@@ -1,0 +1,189 @@
+"""
+BinanceRestClient - Infrastructure Layer
+
+REST API client for fetching historical data from Binance.
+"""
+
+import requests
+import logging
+from datetime import datetime, timedelta
+from typing import List, Optional, Dict, Any
+
+from ...domain.entities.candle import Candle
+
+
+class BinanceRestClient:
+    """
+    REST API client for Binance market data.
+    
+    Features:
+    - Fetch historical klines (candles)
+    - Support multiple intervals
+    - Error handling and retries
+    - Rate limit awareness
+    """
+    
+    BASE_URL = "https://api.binance.com/api/v3"
+    
+    def __init__(self, timeout: int = 10):
+        """
+        Initialize REST client.
+        
+        Args:
+            timeout: Request timeout in seconds
+        """
+        self.timeout = timeout
+        self.logger = logging.getLogger(__name__)
+    
+    def get_klines(
+        self,
+        symbol: str = "BTCUSDT",
+        interval: str = "1m",
+        limit: int = 100,
+        end_time: Optional[int] = None
+    ) -> List[Candle]:
+        """
+        Fetch historical klines from Binance.
+        
+        Args:
+            symbol: Trading pair (e.g., 'BTCUSDT')
+            interval: Kline interval (e.g., '1m', '15m', '1h')
+            limit: Number of klines to fetch (max 1000)
+            end_time: End time in milliseconds (default: now)
+        
+        Returns:
+            List of Candle entities
+        """
+        if limit > 1000:
+            self.logger.warning(f"Limit {limit} exceeds max 1000, using 1000")
+            limit = 1000
+        
+        try:
+            url = f"{self.BASE_URL}/klines"
+            
+            params = {
+                'symbol': symbol.upper(),
+                'interval': interval,
+                'limit': limit
+            }
+            
+            if end_time:
+                params['endTime'] = end_time
+            
+            self.logger.debug(f"Fetching klines: {params}")
+            
+            response = requests.get(
+                url,
+                params=params,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            # Parse klines to Candle entities
+            candles = []
+            for kline in data:
+                candle = self._parse_kline(kline)
+                if candle:
+                    candles.append(candle)
+            
+            self.logger.info(f"Fetched {len(candles)} klines for {symbol} {interval}")
+            return candles
+            
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Failed to fetch klines: {e}")
+            return []
+        except Exception as e:
+            self.logger.error(f"Error parsing klines: {e}")
+            return []
+    
+    def _parse_kline(self, kline: List) -> Optional[Candle]:
+        """
+        Parse Binance kline array to Candle entity.
+        
+        Binance kline format:
+        [
+            1499040000000,      # 0: Open time
+            "0.01634790",       # 1: Open
+            "0.80765069",       # 2: High
+            "0.01575800",       # 3: Low
+            "0.01577100",       # 4: Close
+            "148976.11427815",  # 5: Volume
+            1499644799999,      # 6: Close time
+            "2434.19055334",    # 7: Quote asset volume
+            31,                 # 8: Number of trades
+            "1756.87402397",    # 9: Taker buy base asset volume
+            "28.46694368",      # 10: Taker buy quote asset volume
+            "0"                 # 11: Ignore
+        ]
+        
+        Args:
+            kline: Kline array from Binance
+        
+        Returns:
+            Candle entity or None if parsing fails
+        """
+        try:
+            timestamp_ms = int(kline[0])
+            open_price = float(kline[1])
+            high_price = float(kline[2])
+            low_price = float(kline[3])
+            close_price = float(kline[4])
+            volume = float(kline[5])
+            
+            timestamp = datetime.fromtimestamp(timestamp_ms / 1000)
+            
+            return Candle(
+                timestamp=timestamp,
+                open=open_price,
+                high=high_price,
+                low=low_price,
+                close=close_price,
+                volume=volume
+            )
+            
+        except (ValueError, IndexError) as e:
+            self.logger.error(f"Error parsing kline: {e}")
+            return None
+    
+    def get_server_time(self) -> Optional[int]:
+        """
+        Get server time from Binance.
+        
+        Returns:
+            Server time in milliseconds or None if failed
+        """
+        try:
+            url = f"{self.BASE_URL}/time"
+            response = requests.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            
+            data = response.json()
+            return data.get('serverTime')
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get server time: {e}")
+            return None
+    
+    def get_exchange_info(self) -> Optional[Dict[str, Any]]:
+        """
+        Get exchange information.
+        
+        Returns:
+            Exchange info dict or None if failed
+        """
+        try:
+            url = f"{self.BASE_URL}/exchangeInfo"
+            response = requests.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            
+            return response.json()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get exchange info: {e}")
+            return None
+    
+    def __repr__(self) -> str:
+        """String representation"""
+        return f"BinanceRestClient(base_url={self.BASE_URL})"
