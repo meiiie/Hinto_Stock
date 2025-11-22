@@ -12,6 +12,9 @@ from src.infrastructure.indicators.vwap_calculator import VWAPCalculator
 from src.infrastructure.indicators.bollinger_calculator import BollingerCalculator
 from src.infrastructure.indicators.stoch_rsi_calculator import StochRSICalculator
 from src.application.services.smart_entry_calculator import SmartEntryCalculator
+from src.infrastructure.indicators.adx_calculator import ADXCalculator
+from src.infrastructure.indicators.atr_calculator import ATRCalculator
+from src.infrastructure.indicators.volume_spike_detector import VolumeSpikeDetector
 
 def create_mock_candles(count: int = 100) -> List[Candle]:
     candles = []
@@ -41,7 +44,7 @@ def create_mock_candles(count: int = 100) -> List[Candle]:
 def test_signal_generator_integration():
     # Initialize dependencies
     talib_calc = TALibCalculator()
-    entry_calc = EntryPriceCalculator()
+    # entry_calc = EntryPriceCalculator() # Deprecated
     tp_calc = TPCalculator()
     sl_calc = StopLossCalculator()
     conf_calc = ConfidenceCalculator()
@@ -51,11 +54,14 @@ def test_signal_generator_integration():
     bollinger_calc = BollingerCalculator()
     stoch_calc = StochRSICalculator()
     smart_entry_calc = SmartEntryCalculator()
+    adx_calc = ADXCalculator()
+    atr_calc = ATRCalculator()
+    vol_spike = VolumeSpikeDetector()
     
     # Initialize SignalGenerator
     generator = SignalGenerator(
         talib_calculator=talib_calc,
-        entry_calculator=entry_calc,
+        # entry_calculator=entry_calc, # Removed
         tp_calculator=tp_calc,
         stop_loss_calculator=sl_calc,
         confidence_calculator=conf_calc,
@@ -63,6 +69,9 @@ def test_signal_generator_integration():
         bollinger_calculator=bollinger_calc,
         stoch_rsi_calculator=stoch_calc,
         smart_entry_calculator=smart_entry_calc,
+        adx_calculator=adx_calc,
+        atr_calculator=atr_calc,
+        volume_spike_detector=vol_spike,
         strict_mode=False,
         use_filters=False 
     )

@@ -5,11 +5,12 @@ Displays side-by-side charts for 15m and 1h timeframes.
 """
 
 import streamlit as st
-from typing import List
+from typing import List, Optional
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from ....domain.entities.candle import Candle
+from ....domain.entities.trading_signal import TradingSignal
 from ....application.services.realtime_service import RealtimeService
 from ..config.theme_config import (
     CHART_CANDLESTICK_UP,
@@ -24,14 +25,16 @@ from ..config.theme_config import (
 
 def create_candlestick_chart(
     candles: List[Candle],
-    title: str = "Price Chart"
+    title: str = "Price Chart",
+    signal: Optional[TradingSignal] = None
 ) -> go.Figure:
     """
-    Create a candlestick chart with EMA, RSI, and Volume subplots.
+    Create a candlestick chart with VWAP, BB, StochRSI, and Volume subplots.
     
     Args:
         candles: List of Candle objects
         title: Chart title
+        signal: Optional active trading signal to display
     
     Returns:
         Plotly Figure object
@@ -56,21 +59,88 @@ def create_candlestick_chart(
     closes = [c.close for c in candles]
     volumes = [c.volume for c in candles]
     
-    # EMA and RSI data - use getattr to safely access attributes
-    ema7_values = [getattr(c, 'ema_7', None) for c in candles]
-    ema25_values = [getattr(c, 'ema_25', None) for c in candles]
-    rsi_values = [getattr(c, 'rsi_6', None) for c in candles]
+    # Indicators data - use getattr to safely access attributes
+    # VWAP
+    vwap_values = [getattr(c, 'vwap', None) for c in candles]
     
-    # Create subplots: Price, RSI, Volume
+    # Bollinger Bands
+    bb_upper = []
+    bb_lower = []
+    for c in candles:
+        bb = getattr(c, 'bollinger', {})
+        if bb:
+            bb_upper.append(bb.get('upper_band'))
+            bb_lower.append(bb.get('lower_band'))
+        else:
+            bb_upper.append(None)
+            bb_lower.append(None)
+            
+    # StochRSI
+    stoch_k = []
+    stoch_d = []
+    for c in candles:
+        stoch = getattr(c, 'stoch_rsi', {})
+        if stoch:
+            stoch_k.append(stoch.get('k'))
+            stoch_d.append(stoch.get('d'))
+        else:
+            stoch_k.append(None)
+            stoch_d.append(None)
+    
+    # Create subplots: Price, StochRSI, Volume
     fig = make_subplots(
         rows=3, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.05,
         row_heights=[0.6, 0.2, 0.2],
-        subplot_titles=(title, "RSI(6)", "Volume")
+        subplot_titles=(title, "StochRSI", "Volume")
     )
     
-    # 1. Candlestick chart
+    # 1. Bollinger Bands (Shaded Area) - Draw FIRST to be behind candles
+    if any(bb_upper) and any(bb_lower):
+        # Upper Band (Transparent line)
+        fig.add_trace(
+            go.Scatter(
+                x=timestamps, y=bb_upper,
+                line=dict(color='rgba(0,0,0,0)'),
+                showlegend=False,
+                hoverinfo='skip'
+            ),
+            row=1, col=1
+        )
+        # Lower Band (Fill to Upper)
+        fig.add_trace(
+            go.Scatter(
+                x=timestamps, y=bb_lower,
+                fill='tonexty',
+                fillcolor='rgba(173, 216, 230, 0.2)',  # Light Blue, 20% opacity
+                line=dict(color='rgba(0,0,0,0)'),
+                name="Bollinger Bands",
+                hoverinfo='skip'
+            ),
+            row=1, col=1
+        )
+        # Add visible lines for bands
+        fig.add_trace(
+            go.Scatter(
+                x=timestamps, y=bb_upper,
+                line=dict(color='rgba(173, 216, 230, 0.5)', width=1),
+                showlegend=False,
+                name="Upper BB"
+            ),
+            row=1, col=1
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=timestamps, y=bb_lower,
+                line=dict(color='rgba(173, 216, 230, 0.5)', width=1),
+                showlegend=False,
+                name="Lower BB"
+            ),
+            row=1, col=1
+        )
+
+    # 2. Candlestick chart (On top of BB)
     fig.add_trace(
         go.Candlestick(
             x=timestamps,
@@ -85,61 +155,72 @@ def create_candlestick_chart(
         row=1, col=1
     )
     
-    # 2. EMA(7) overlay
-    if any(ema7_values):
+    # 3. VWAP overlay
+    if any(vwap_values):
         fig.add_trace(
             go.Scatter(
                 x=timestamps,
-                y=ema7_values,
-                name="EMA(7)",
-                line=dict(color="#1f77b4", width=2),  # Blue
-                mode='lines'
-            ),
-            row=1, col=1
-        )
-    
-    # 3. EMA(25) overlay
-    if any(ema25_values):
-        fig.add_trace(
-            go.Scatter(
-                x=timestamps,
-                y=ema25_values,
-                name="EMA(25)",
+                y=vwap_values,
+                name="VWAP",
                 line=dict(color="#ff7f0e", width=2),  # Orange
                 mode='lines'
             ),
             row=1, col=1
         )
+        
+    # 4. Smart Entry Line (if signal active)
+    if signal and signal.signal_type.value != 'neutral' and signal.entry_price:
+        fig.add_hline(
+            y=signal.entry_price,
+            line_dash="dash",
+            line_color="#00E676",  # Bright Green
+            line_width=2,
+            annotation_text=f"Smart Entry: ${signal.entry_price:,.2f}",
+            annotation_position="right",
+            annotation_font_color="#00E676",
+            row=1, col=1
+        )
     
-    # 4. RSI subplot
-    if any(rsi_values):
+    # 5. StochRSI subplot
+    if any(stoch_k):
+        # K Line (Fast) - Blue
         fig.add_trace(
             go.Scatter(
                 x=timestamps,
-                y=rsi_values,
-                name="RSI",
-                line=dict(color="purple", width=2),
-                fill='tozeroy',
-                fillcolor='rgba(128, 0, 128, 0.1)'
+                y=stoch_k,
+                name="Stoch %K",
+                line=dict(color="#2196F3", width=1.5),
+                mode='lines'
+            ),
+            row=2, col=1
+        )
+        # D Line (Slow) - Red
+        fig.add_trace(
+            go.Scatter(
+                x=timestamps,
+                y=stoch_d,
+                name="Stoch %D",
+                line=dict(color="#FF5252", width=1.5),
+                mode='lines'
             ),
             row=2, col=1
         )
         
-        # Add RSI levels (30 and 70)
+        # Add StochRSI levels (20 and 80)
         fig.add_hline(
-            y=70, line_dash="dash", line_color="red",
-            annotation_text="Overbought (70)",
+            y=80, line_dash="dash", line_color="red",
+            annotation_text="Overbought (80)",
             annotation_position="right",
             row=2, col=1
         )
         fig.add_hline(
-            y=30, line_dash="dash", line_color="green",
-            annotation_text="Oversold (30)",
+            y=20, line_dash="dash", line_color="green",
+            annotation_text="Oversold (20)",
             annotation_position="right",
             row=2, col=1
         )
     
-    # 5. Volume bars with spike detection
+    # 6. Volume bars with spike detection
     # Calculate volume MA(20) for spike detection
     volume_ma = []
     for i in range(len(volumes)):
@@ -231,7 +312,7 @@ def create_candlestick_chart(
     fig.update_yaxes(
         gridcolor=CHART_GRID,
         showgrid=True,
-        title_text="RSI",
+        title_text="StochRSI",
         range=[0, 100],
         row=2, col=1
     )
@@ -253,13 +334,6 @@ def render_multi_chart(service: RealtimeService, limit: int = 100) -> None:
     Args:
         service: RealtimeService instance
         limit: Maximum number of candles to display
-    
-    Displays:
-        - Two columns (15m and 1h)
-        - Candlestick chart with EMA(7) overlay
-        - RSI subplot
-        - Volume subplot
-        - Synchronized time axis
     """
     try:
         st.markdown("### 📊 Multi-timeframe Analysis")
@@ -267,6 +341,9 @@ def render_multi_chart(service: RealtimeService, limit: int = 100) -> None:
         # Get candles for both timeframes
         candles_15m = service.get_candles('15m', limit)
         candles_1h = service.get_candles('1h', limit)
+        
+        # Get current signal
+        current_signal = service.get_current_signals()
         
         # Check if we have data
         if not candles_15m and not candles_1h:
@@ -280,7 +357,7 @@ def render_multi_chart(service: RealtimeService, limit: int = 100) -> None:
         with col1:
             st.markdown("#### 15-Minute Chart")
             if candles_15m:
-                fig_15m = create_candlestick_chart(candles_15m, "15m Timeframe")
+                fig_15m = create_candlestick_chart(candles_15m, "15m Timeframe", current_signal)
                 st.plotly_chart(fig_15m, use_container_width=True)
                 st.caption(f"Showing {len(candles_15m)} candles")
             else:
@@ -290,7 +367,7 @@ def render_multi_chart(service: RealtimeService, limit: int = 100) -> None:
         with col2:
             st.markdown("#### 1-Hour Chart")
             if candles_1h:
-                fig_1h = create_candlestick_chart(candles_1h, "1h Timeframe")
+                fig_1h = create_candlestick_chart(candles_1h, "1h Timeframe", current_signal)
                 st.plotly_chart(fig_1h, use_container_width=True)
                 st.caption(f"Showing {len(candles_1h)} candles")
             else:
@@ -344,7 +421,7 @@ def render_chart_controls() -> dict:
         timeframe = st.selectbox(
             "Timeframe",
             options=["1m", "15m", "1h"],
-            index=1,
+            index=0,
             key="chart_timeframe"
         )
     

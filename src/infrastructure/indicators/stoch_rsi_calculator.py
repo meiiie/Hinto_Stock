@@ -99,9 +99,17 @@ class StochRSICalculator:
         if not candles or len(candles) < min_required:
             return None
         
-        # Extract close prices
+        # Extract close prices and ensure numeric type
         closes = pd.Series([c.close for c in candles])
         
+        closes = pd.to_numeric(closes, errors='coerce')
+        
+        # Handle potential NaNs from conversion
+        if closes.isnull().any():
+            print(f"WARNING: NaNs found after conversion! Count: {closes.isnull().sum()}")
+            # Fill forward then backward to handle gaps
+            closes = closes.ffill().bfill()
+            
         # Step 1: Calculate RSI
         rsi = self.calculate_rsi(closes, self.rsi_period)
         
@@ -109,8 +117,12 @@ class StochRSICalculator:
         rsi_min = rsi.rolling(window=self.stoch_period).min()
         rsi_max = rsi.rolling(window=self.stoch_period).max()
         
-        stoch_rsi = (rsi - rsi_min) / (rsi_max - rsi_min) * 100
-        stoch_rsi = stoch_rsi.fillna(50)  # Fill NaN with neutral
+        # Avoid division by zero
+        denominator = rsi_max - rsi_min
+        denominator = denominator.replace(0, np.nan)
+        
+        stoch_rsi = (rsi - rsi_min) / denominator * 100
+        stoch_rsi = stoch_rsi.fillna(50)
         
         # Step 3: Calculate %K (smoothed StochRSI)
         k_line = stoch_rsi.rolling(window=self.k_period).mean()
@@ -122,6 +134,10 @@ class StochRSICalculator:
         k_current = k_line.iloc[-1]
         d_current = d_line.iloc[-1]
         rsi_current = rsi.iloc[-1]
+        
+        # Check for NaN results (e.g. insufficient valid data)
+        if pd.isna(k_current) or pd.isna(d_current):
+            return None
         
         # Get previous values for crossover detection
         k_previous = k_line.iloc[-2] if len(k_line) > 1 else k_current
@@ -140,14 +156,14 @@ class StochRSICalculator:
         k_cross_down = (k_previous >= d_previous) and (k_current < d_current)
         
         return StochRSIResult(
-            k_value=k_current,
-            d_value=d_current,
-            rsi_value=rsi_current,
+            k_value=float(k_current),
+            d_value=float(d_current),
+            rsi_value=float(rsi_current),
             zone=zone,
             is_oversold=k_current < 20,
             is_overbought=k_current > 80,
-            k_cross_up=k_cross_up,
-            k_cross_down=k_cross_down
+            k_cross_up=bool(k_cross_up),
+            k_cross_down=bool(k_cross_down)
         )
     
     def get_series(

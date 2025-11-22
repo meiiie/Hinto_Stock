@@ -50,21 +50,34 @@ class VWAPCalculator:
         if not candles or len(candles) < 1:
             return None
         
+        # Filter candles for the current day (Anchored VWAP)
+        if not candles:
+            return None
+            
+        last_candle = candles[-1]
+        current_date = last_candle.timestamp.date()
+        
+        # Filter candles that belong to the same day as the last candle
+        day_candles = [c for c in candles if c.timestamp.date() == current_date]
+        
+        if not day_candles:
+            return None
+            
         # Calculate typical price for each candle
         typical_prices = [
             (c.high + c.low + c.close) / 3.0
-            for c in candles
+            for c in day_candles
         ]
         
         # Calculate TPV (Typical Price × Volume)
         typical_price_volume = [
             tp * c.volume
-            for tp, c in zip(typical_prices, candles)
+            for tp, c in zip(typical_prices, day_candles)
         ]
         
         # Sum values
         total_tpv = sum(typical_price_volume)
-        total_volume = sum(c.volume for c in candles)
+        total_volume = sum(c.volume for c in day_candles)
         
         # Avoid division by zero
         if total_volume == 0:
@@ -94,6 +107,7 @@ class VWAPCalculator:
         
         # Convert to DataFrame
         df = pd.DataFrame({
+            'timestamp': [c.timestamp for c in candles],
             'high': [c.high for c in candles],
             'low': [c.low for c in candles],
             'close': [c.close for c in candles],
@@ -106,9 +120,13 @@ class VWAPCalculator:
         # Calculate TPV
         df['tpv'] = df['typical_price'] * df['volume']
         
-        # Calculate cumulative sums
-        df['cum_tpv'] = df['tpv'].cumsum()
-        df['cum_volume'] = df['volume'].cumsum()
+        # Group by date to implement Anchored VWAP (reset daily)
+        # We use the date part of the timestamp for grouping
+        df['date'] = df['timestamp'].dt.date
+        
+        # Calculate cumulative sums per group (day)
+        df['cum_tpv'] = df.groupby('date')['tpv'].cumsum()
+        df['cum_volume'] = df.groupby('date')['volume'].cumsum()
         
         # Calculate VWAP
         df['vwap'] = df['cum_tpv'] / df['cum_volume']

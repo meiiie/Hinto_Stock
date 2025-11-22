@@ -196,6 +196,7 @@ class BinanceWebSocketClient:
                 
                 # Receive message
                 message = await self._websocket.recv()
+                # print(f"DEBUG: Received message: {message[:50]}...") # Uncomment for extreme debug
                 
                 # Update last update time
                 self._last_update = datetime.now()
@@ -273,6 +274,7 @@ class BinanceWebSocketClient:
                 event_time = datetime.fromtimestamp(data['E'] / 1000)
                 latency = (datetime.now() - event_time).total_seconds() * 1000
                 self._latency_ms = int(latency)
+                # print(f"DEBUG: Latency updated: {self._latency_ms}ms")
             
             # Parse message to Candle entity
             candle = self._parser.parse_kline_message(data)

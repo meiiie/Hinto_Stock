@@ -13,7 +13,6 @@ from enum import Enum
 
 from ...domain.entities.candle import Candle
 from ...domain.entities.trading_signal import TradingSignal, SignalType, ConfidenceLevel
-from ..analysis import VolumeAnalyzer, RSIMonitor, RSIZone, SpikeLevel
 from ...infrastructure.indicators.volume_spike_detector import (
     VolumeSpikeDetector,
     VolumeSpikeResult,
@@ -26,91 +25,59 @@ from ...infrastructure.indicators.talib_calculator import TALibCalculator
 from ...infrastructure.indicators.vwap_calculator import VWAPCalculator
 from ...infrastructure.indicators.bollinger_calculator import BollingerCalculator
 from ...infrastructure.indicators.stoch_rsi_calculator import StochRSICalculator
-from ..services.entry_price_calculator import EntryPriceCalculator
 from ..services.tp_calculator import TPCalculator
 from ..services.stop_loss_calculator import StopLossCalculator
 from ..services.confidence_calculator import ConfidenceCalculator
 from ..services.smart_entry_calculator import SmartEntryCalculator
 
 
-
-
-
 class SignalGenerator:
     """
     Generates trading signals by combining technical indicators.
     
-    Signal Logic:
-    - BUY: RSI oversold + Volume spike + Price above EMA (2+ conditions)
-    - SELL: RSI overbought + Volume spike + Price below EMA (2+ conditions)
-    
-    Confidence Calculation:
-    - LOW (50-65%): 2 conditions met
-    - MEDIUM (65-80%): 3 conditions met
-    - HIGH (80-95%): All conditions + strong volume spike
+    Strategy: Trend Pullback
+    - Trend: VWAP
+    - Setup: Bollinger Bands / VWAP Pullback
+    - Trigger: StochRSI
     """
     
     def __init__(
         self,
-        volume_analyzer: Optional[VolumeAnalyzer] = None,
-        rsi_monitor: Optional[RSIMonitor] = None,
-        volume_spike_detector: Optional[VolumeSpikeDetector] = None,
+        # Required dependencies (DI)
+        vwap_calculator: VWAPCalculator,
+        bollinger_calculator: BollingerCalculator,
+        stoch_rsi_calculator: StochRSICalculator,
+        smart_entry_calculator: SmartEntryCalculator,
+        # Optional dependencies
         volume_spike_detector: Optional[VolumeSpikeDetector] = None,
         adx_calculator: Optional[ADXCalculator] = None,
         atr_calculator: Optional[ATRCalculator] = None,
         talib_calculator: Optional[TALibCalculator] = None,
-        entry_calculator: Optional[EntryPriceCalculator] = None,
         tp_calculator: Optional[TPCalculator] = None,
         stop_loss_calculator: Optional[StopLossCalculator] = None,
         confidence_calculator: Optional[ConfidenceCalculator] = None,
-        # New Trend Pullback calculators
-        vwap_calculator: Optional[VWAPCalculator] = None,
-        bollinger_calculator: Optional[BollingerCalculator] = None,
-        stoch_rsi_calculator: Optional[StochRSICalculator] = None,
-        smart_entry_calculator: Optional[SmartEntryCalculator] = None,
+        # Config
         account_size: float = 10000.0,
         use_filters: bool = True,
         strict_mode: bool = True
     ):
         """
         Initialize signal generator.
-        
-        Args:
-            volume_analyzer: VolumeAnalyzer instance
-            rsi_monitor: RSIMonitor instance
-            volume_spike_detector: VolumeSpikeDetector instance
-            ema_crossover_detector: EMACrossoverDetector instance
-            trend_filter: TrendFilter instance
-            adx_calculator: ADXCalculator instance
-            atr_calculator: ATRCalculator instance
-            talib_calculator: TALibCalculator instance
-            entry_calculator: EntryPriceCalculator instance
-            tp_calculator: TPCalculator instance
-            stop_loss_calculator: StopLossCalculator instance
-            confidence_calculator: ConfidenceCalculator instance
-            account_size: Account size for position sizing (default: 10000.0)
-            use_filters: Enable/disable trend and volatility filters
-            strict_mode: Enable stricter signal conditions
         """
-        self.volume_analyzer = volume_analyzer or VolumeAnalyzer(ma_period=20)
-        self.rsi_monitor = rsi_monitor or RSIMonitor(period=6)
-        # Use stricter volume threshold if strict_mode enabled
         volume_threshold = 2.5 if strict_mode else 2.0
-        self.volume_spike_detector = volume_spike_detector or VolumeSpikeDetector(threshold=volume_threshold)
         self.volume_spike_detector = volume_spike_detector or VolumeSpikeDetector(threshold=volume_threshold)
         self.adx_calculator = adx_calculator or ADXCalculator(period=14)
         self.atr_calculator = atr_calculator or ATRCalculator(period=14)
         self.talib_calculator = talib_calculator or TALibCalculator()
-        self.entry_calculator = entry_calculator or EntryPriceCalculator()
         self.tp_calculator = tp_calculator or TPCalculator()
         self.stop_loss_calculator = stop_loss_calculator or StopLossCalculator()
         self.confidence_calculator = confidence_calculator or ConfidenceCalculator()
         
-        # Initialize new Trend Pullback calculators
-        self.vwap_calculator = vwap_calculator or VWAPCalculator()
-        self.bollinger_calculator = bollinger_calculator or BollingerCalculator(period=20, std_multiplier=2.0)
-        self.stoch_rsi_calculator = stoch_rsi_calculator or StochRSICalculator(k_period=3, d_period=3, rsi_period=14)
-        self.smart_entry_calculator = smart_entry_calculator or SmartEntryCalculator()
+        # Injected calculators
+        self.vwap_calculator = vwap_calculator
+        self.bollinger_calculator = bollinger_calculator
+        self.stoch_rsi_calculator = stoch_rsi_calculator
+        self.smart_entry_calculator = smart_entry_calculator
         
         self.account_size = account_size
         self.use_filters = use_filters
@@ -185,11 +152,6 @@ class SignalGenerator:
                             f"will reduce confidence"
                         )
             
-            # Analyze volume
-            volume_analysis = self.volume_analyzer.analyze(candles)
-            if not volume_analysis:
-                return None
-            
             # Detect volume spike using professional detector
             volumes = [c.volume for c in candles]
             volume_spike_result = self.volume_spike_detector.detect_spike_from_list(
@@ -197,28 +159,10 @@ class SignalGenerator:
                 ma_period=20
             )
             
-            # Analyze RSI (using RSIMonitor for alerts/zones, but value from TALib)
-            rsi_analysis = self.rsi_monitor.analyze(candles)
-            if not rsi_analysis:
-                return None
-            
-            # Detect EMA crossover - REMOVED (Not used in Trend Pullback strategy)
-            
             # Collect indicators
             indicators = {
                 'timestamp': current_candle.timestamp,  # Add timestamp for accurate backtest timing
                 'rsi': rsi_value,
-                'rsi_zone': rsi_analysis['zone'].value,
-                'rsi_alerts': [
-                    {
-                        'zone': alert.zone.value,
-                        'message': alert.message,
-                        'severity': alert.severity
-                    }
-                    for alert in rsi_analysis.get('alerts', [])
-                ],
-                'volume_ratio': volume_analysis.ratio,
-                'volume_spike': volume_analysis.spike_level.value,
                 'volume_spike_intensity': volume_spike_result.intensity.value if volume_spike_result else 'none',
                 'volume_spike_ratio': volume_spike_result.ratio if volume_spike_result else 0.0,
                 'ema_7': ema_7_current,
@@ -235,7 +179,7 @@ class SignalGenerator:
             bb_result = None
             stoch_result = None
             
-            # Calculate new Trend Pullback indicators (for testing - not used in signal logic yet)
+            # Calculate new Trend Pullback indicators
             try:
                 # VWAP - trend direction
                 vwap_result = self.vwap_calculator.calculate_vwap(candles)
@@ -424,6 +368,20 @@ class SignalGenerator:
         signal.confidence = final_confidence / 100.0
         signal.reasons.append(f"Confidence: {signal.confidence:.0%}")
         
+        # 6. Strict R:R Check (Master Spec)
+        # If R:R < 0.8, invalidate the signal (Relaxed from 1.0 per Expert Feedback)
+        if hasattr(signal, 'risk_reward_ratio') and signal.risk_reward_ratio < 0.8:
+            signal.signal_type = SignalType.NEUTRAL
+            signal.reasons.append(f"INVALIDATED: R:R {signal.risk_reward_ratio:.2f} < 0.8 (Strict Filter)")
+            return None # Strictly return None for invalidated signals
+
+        # 7. Volume Climax Filter (Task B)
+        # If volume is too high (> 4.0x), it might be a climax/exhaustion, not a breakout
+        if signal.indicators.get('volume_spike_ratio', 0) > 4.0:
+            signal.signal_type = SignalType.NEUTRAL
+            signal.reasons.append(f"INVALIDATED: Volume Climax (Ratio {signal.indicators.get('volume_spike_ratio'):.1f}x > 4.0x)")
+            return None
+
         return signal
 
     def _check_buy_conditions(
@@ -471,12 +429,13 @@ class SignalGenerator:
         
         # 3. Trigger: StochRSI Cross Up
         # We want K crossing above D, and ideally K is not too high yet
+        # Master Spec: Threshold 30 (was 20)
         if stoch_result.k_cross_up and stoch_result.k_value < 80:
             conditions_met += 1
             reasons.append(f"Trigger: StochRSI Cross Up (K={stoch_result.k_value:.1f})")
-        elif stoch_result.is_oversold:
+        elif stoch_result.k_value < 30: # Oversold threshold 30
              # Alternative trigger: Just being oversold is a setup, waiting for cross
-             reasons.append(f"Setup: StochRSI Oversold (K={stoch_result.k_value:.1f})")
+             reasons.append(f"Setup: StochRSI Oversold (K={stoch_result.k_value:.1f} < 30)")
         
         # 4. Confirmation: Candle Color & Volume
         is_green = current_candle.close > current_candle.open
@@ -553,11 +512,12 @@ class SignalGenerator:
         
         # 3. Trigger: StochRSI Cross Down
         # We want K crossing below D, and ideally K is not too low yet
+        # Master Spec: Threshold 70 (was 80)
         if stoch_result.k_cross_down and stoch_result.k_value > 20:
             conditions_met += 1
             reasons.append(f"Trigger: StochRSI Cross Down (K={stoch_result.k_value:.1f})")
-        elif stoch_result.is_overbought:
-             reasons.append(f"Setup: StochRSI Overbought (K={stoch_result.k_value:.1f})")
+        elif stoch_result.k_value > 70: # Overbought threshold 70
+             reasons.append(f"Setup: StochRSI Overbought (K={stoch_result.k_value:.1f} > 70)")
         
         # 4. Confirmation: Candle Color & Volume
         is_red = current_candle.close < current_candle.open
@@ -589,13 +549,12 @@ class SignalGenerator:
         return None
 
     
-
-    
     def __repr__(self) -> str:
         """String representation"""
         return (
             f"SignalGenerator("
-            f"volume_analyzer={self.volume_analyzer}, "
-            f"rsi_monitor={self.rsi_monitor}"
+            f"vwap={self.vwap_calculator}, "
+            f"bb={self.bollinger_calculator}, "
+            f"stoch={self.stoch_rsi_calculator}"
             f")"
         )

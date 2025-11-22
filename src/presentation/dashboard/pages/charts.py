@@ -56,6 +56,10 @@ def render():
         candles_15m = service.get_candles('15m', 1)
         candles_1h = service.get_candles('1h', 1)
         
+        # Get calculated indicators
+        indicators_15m = service.get_latest_indicators('15m')
+        indicators_1h = service.get_latest_indicators('1h')
+        
         col1, col2 = st.columns(2)
         
         with col1:
@@ -66,22 +70,24 @@ def render():
                 col_a, col_b = st.columns(2)
                 with col_a:
                     st.metric("Price", f"${latest_15m.close:,.2f}")
-                    # Calculate RSI from service
-                    if len(candles_15m) >= 7:
-                        try:
-                            rsi_result = service.rsi_monitor.analyze(candles_15m)
-                            if rsi_result and rsi_result.rsi_value is not None:
-                                rsi_status = "Overbought" if rsi_result.rsi_value > 70 else "Oversold" if rsi_result.rsi_value < 30 else "Neutral"
-                                st.metric("RSI(6)", f"{rsi_result.rsi_value:.1f}", rsi_status)
-                            else:
-                                st.metric("RSI(6)", "Calculating...")
-                        except:
-                            st.metric("RSI(6)", "N/A")
+                    # StochRSI from indicators
+                    stoch = indicators_15m.get('stoch_rsi', {})
+                    if stoch:
+                        k = stoch.get('k', 0)
+                        d = stoch.get('d', 0)
+                        status = "EXTREME OVERSOLD" if k < 0.1 else "Overbought" if k > 80 else "Oversold" if k < 20 else "Neutral"
+                        st.metric("StochRSI", f"{k:.1f}/{d:.1f}", status)
                     else:
-                        st.metric("RSI(6)", "Need more data...")
+                        st.metric("StochRSI", "Calculating...")
                 
                 with col_b:
-                    st.metric("EMA Distance", "N/A")
+                    # VWAP Distance
+                    vwap = indicators_15m.get('vwap', 0)
+                    if vwap > 0:
+                        dist = (latest_15m.close - vwap) / vwap
+                        st.metric("VWAP Dist", f"{dist:.2%}")
+                    else:
+                        st.metric("VWAP Dist", "N/A")
                     st.metric("Volume", f"{latest_15m.volume:.2f} BTC")
             else:
                 st.info("⏳ No 15m data yet")
@@ -94,22 +100,24 @@ def render():
                 col_a, col_b = st.columns(2)
                 with col_a:
                     st.metric("Price", f"${latest_1h.close:,.2f}")
-                    # Calculate RSI from service
-                    if len(candles_1h) >= 7:
-                        try:
-                            rsi_result = service.rsi_monitor.analyze(candles_1h)
-                            if rsi_result and rsi_result.rsi_value is not None:
-                                rsi_status = "Overbought" if rsi_result.rsi_value > 70 else "Oversold" if rsi_result.rsi_value < 30 else "Neutral"
-                                st.metric("RSI(6)", f"{rsi_result.rsi_value:.1f}", rsi_status)
-                            else:
-                                st.metric("RSI(6)", "Calculating...")
-                        except:
-                            st.metric("RSI(6)", "N/A")
+                    # StochRSI from indicators
+                    stoch = indicators_1h.get('stoch_rsi', {})
+                    if stoch:
+                        k = stoch.get('k', 0)
+                        d = stoch.get('d', 0)
+                        status = "EXTREME OVERSOLD" if k < 0.1 else "Overbought" if k > 80 else "Oversold" if k < 20 else "Neutral"
+                        st.metric("StochRSI", f"{k:.1f}/{d:.1f}", status)
                     else:
-                        st.metric("RSI(6)", "Need more data...")
+                        st.metric("StochRSI", "Calculating...")
                 
                 with col_b:
-                    st.metric("EMA Distance", "N/A")
+                    # VWAP Distance
+                    vwap = indicators_1h.get('vwap', 0)
+                    if vwap > 0:
+                        dist = (latest_1h.close - vwap) / vwap
+                        st.metric("VWAP Dist", f"{dist:.2%}")
+                    else:
+                        st.metric("VWAP Dist", "N/A")
                     st.metric("Volume", f"{latest_1h.volume:.2f} BTC")
             else:
                 st.info("⏳ No 1h data yet")
@@ -159,13 +167,11 @@ def render():
     with col1:
         st.markdown("**Indicators Displayed:**")
         st.caption("• Candlestick patterns (OHLC)")
-        st.caption("• EMA(7) - Fast trend (Blue)")
-        st.caption("• EMA(25) - Slow trend (Orange)")
-        st.caption("• RSI(6) - Relative Strength Index")
+        st.caption("• VWAP - Volume Weighted Average Price (Orange)")
+        st.caption("• Bollinger Bands (Shaded Blue)")
+        st.caption("• StochRSI (Blue/Red lines in subplot)")
         st.caption("• Volume with MA(20) and spike detection")
-        st.caption("• Volume spikes highlighted (Orange bars)")
-        st.caption("• Spike threshold line (2x average)")
-        st.caption("• Overbought/Oversold levels (70/30)")
+        st.caption("• Smart Entry & TP/SL levels (when active)")
     
     with col2:
         st.markdown("**Interactive Features:**")

@@ -46,7 +46,12 @@ def render():
             if st.button("▶️ Start Service", use_container_width=True, type="primary"):
                 try:
                     with st.spinner("Starting service..."):
-                        service.start()
+                        # Check if service is async (RealtimeService) or threaded (ThreadedRealtimeService)
+                        import asyncio
+                        if asyncio.iscoroutinefunction(service.start):
+                            asyncio.run(service.start())
+                        else:
+                            service.start()
                     st.success("✅ Service started! Data will appear shortly.")
                     time.sleep(2)
                     st.rerun()
@@ -140,27 +145,37 @@ def render():
                 indicators = service.get_latest_indicators('1m')
                 
                 with col3:
-                    # RSI from centralized calculation
-                    if indicators and 'rsi_6' in indicators:
-                        rsi_value = indicators['rsi_6']
-                        st.metric("RSI(6) 1m", f"{rsi_value:.1f}")
-                        # Show zone indicator
-                        if rsi_value < 30:
+                    # VWAP & Bollinger Bands
+                    if indicators and 'vwap' in indicators:
+                        vwap_val = indicators['vwap']
+                        st.metric("VWAP", f"${vwap_val:,.2f}")
+                        
+                        # Check deviation
+                        if latest.close > vwap_val:
+                            st.caption("🟢 Bullish (> VWAP)")
+                        else:
+                            st.caption("🔴 Bearish (< VWAP)")
+                    else:
+                        st.metric("VWAP", "Calculating...")
+                
+                with col4:
+                    # StochRSI
+                    if indicators and 'stoch_rsi' in indicators:
+                        stoch = indicators['stoch_rsi']
+                        k = stoch.get('k', 0)
+                        d = stoch.get('d', 0)
+                        st.metric("StochRSI (K/D)", f"{k:.1f} / {d:.1f}")
+                        
+                        if k < 0.1:
+                            st.caption("🔴 **EXTREME OVERSOLD**")
+                        elif k < 20:
                             st.caption("🟢 Oversold")
-                        elif rsi_value > 70:
+                        elif k > 80:
                             st.caption("🔴 Overbought")
                         else:
                             st.caption("⚪ Neutral")
                     else:
-                        st.metric("RSI(6) 1m", "Calculating...")
-                
-                with col4:
-                    # EMA from centralized calculation
-                    if indicators and 'ema_7' in indicators:
-                        ema_7 = indicators['ema_7']
-                        st.metric("EMA(7)", f"${ema_7:,.2f}")
-                    else:
-                        st.metric("EMA(7)", "Calculating...")
+                        st.metric("StochRSI", "Calculating...")
                 
                 st.caption(f"Last update: {latest.timestamp.strftime('%H:%M:%S')}")
                 
@@ -171,46 +186,50 @@ def render():
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    # Calculate 24h volume from available candles
-                    candles_for_volume = service.get_candles('1m', limit=100)
-                    if len(candles_for_volume) > 0:
-                        volume_sum = sum(c.volume for c in candles_for_volume)
-                        st.metric(
-                            f"Volume ({len(candles_for_volume)}m)", 
-                            f"{volume_sum:,.2f} BTC"
-                        )
-                        st.caption(f"Sum of last {len(candles_for_volume)} minutes")
+                    # Bollinger Bands Status
+                    if indicators and 'bollinger' in indicators:
+                        bb = indicators['bollinger']
+                        upper = bb.get('upper_band', 0)
+                        lower = bb.get('lower_band', 0)
+                        bandwidth = ((upper - lower) / lower) * 100
+                        
+                        st.metric("BB Bandwidth", f"{bandwidth:.2f}%")
+                        
+                        # Check touch
+                        if latest.close >= upper:
+                            st.caption("🔴 Touching Upper")
+                        elif latest.close <= lower:
+                            st.caption("🟢 Touching Lower")
+                        else:
+                            st.caption("⚪ Inside Bands")
                     else:
-                        st.metric("Volume (24h)", "Calculating...")
+                        st.metric("BB Status", "Calculating...")
                 
                 with col2:
-                    # RSI(14) for comparison with Binance
-                    candles = service.get_candles('1m', limit=100)
-                    if len(candles) >= 15:
-                        try:
-                            from src.application.analysis.rsi_monitor import RSIMonitor
-                            rsi_14 = RSIMonitor(period=14)
-                            rsi_result_14 = rsi_14.analyze(candles)
-                            if rsi_result_14:
-                                st.metric("RSI(14) 1m", f"{rsi_result_14['rsi']:.1f}")
-                                st.caption("Binance default period")
-                            else:
-                                st.metric("RSI(14) 1m", "Calculating...")
-                        except:
-                            st.metric("RSI(14) 1m", "Error")
+                    # Volume Analysis
+                    candles_for_volume = service.get_candles('1m', limit=20)
+                    if len(candles_for_volume) > 0:
+                        avg_vol = sum(c.volume for c in candles_for_volume) / len(candles_for_volume)
+                        vol_ratio = latest.volume / avg_vol if avg_vol > 0 else 0
+                        
+                        st.metric("Volume Ratio", f"{vol_ratio:.2f}x")
+                        if vol_ratio > 2.0:
+                            st.caption("🚀 Spike Detected")
+                        else:
+                            st.caption("Normal Volume")
                     else:
-                        st.metric("RSI(14) 1m", "Need more data...")
+                        st.metric("Volume Ratio", "Calculating...")
                 
                 with col3:
                     # Price change
-                    candles = service.get_candles('1m', limit=100)
+                    candles = service.get_candles('1m', limit=60)
                     if len(candles) >= 2:
                         first_price = candles[0].close
                         last_price = candles[-1].close
                         change = last_price - first_price
                         change_pct = (change / first_price) * 100
                         st.metric(
-                            f"Change ({len(candles)}m)",
+                            f"Change (1h)",
                             f"${change:,.2f}",
                             f"{change_pct:+.2f}%"
                         )

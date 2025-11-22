@@ -15,6 +15,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 from src.infrastructure.di_container import DIContainer
 from src.utils.logging_config import configure_logging
 from src.presentation.dashboard.utils import initialize_session_state
+from src.infrastructure.persistence.sqlite_order_repository import SQLiteOrderRepository
+from src.application.services.paper_trading_service import PaperTradingService
 
 
 # Page configuration
@@ -29,7 +31,7 @@ st.set_page_config(
 )
 
 
-@st.cache_resource
+# @st.cache_resource
 def get_di_container():
     """
     Initialize and cache DI Container.
@@ -49,7 +51,7 @@ def get_di_container():
     return DIContainer(config)
 
 
-@st.cache_resource
+# @st.cache_resource
 def get_dashboard_service():
     """Get DashboardService from DI Container"""
     container = get_di_container()
@@ -65,8 +67,12 @@ def main():
     # Initialize Real-time Service if not exists
     if st.session_state.service is None:
         try:
+            # Initialize Paper Trading dependencies
+            order_repo = SQLiteOrderRepository()
+            paper_service = PaperTradingService(order_repo)
+            
             from src.application.services.realtime_service_threaded import ThreadedRealtimeService
-            st.session_state.service = ThreadedRealtimeService()
+            st.session_state.service = ThreadedRealtimeService(paper_service=paper_service)
             st.sidebar.success("✅ Service initialized")
         except Exception as e:
             st.sidebar.error(f"❌ Service initialization failed: {e}")
@@ -79,7 +85,7 @@ def main():
     # Page selection
     page = st.sidebar.radio(
         "Navigation",
-        ["🏠 Home", "📊 Charts", "🔍 Monitoring", "⚙️ Settings"],
+        ["🏠 Home", "📊 Charts", "🔍 Monitoring", "📝 Paper Trading", "⚙️ Settings"],
         label_visibility="collapsed"
     )
     
@@ -100,6 +106,9 @@ def main():
     elif page == "🔍 Monitoring":
         from src.presentation.dashboard.pages import monitoring
         monitoring.render()
+    elif page == "📝 Paper Trading":
+        from src.presentation.dashboard.pages import paper_trading
+        paper_trading.render()
     elif page == "⚙️ Settings":
         from src.presentation.dashboard.pages import settings
         settings.render()

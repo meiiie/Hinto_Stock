@@ -6,6 +6,8 @@ Provides pipeline controls, dashboard preferences, and system information.
 
 import streamlit as st
 import sys
+from datetime import datetime
+from src.domain.entities.trading_signal import TradingSignal, SignalType
 
 
 def render():
@@ -111,3 +113,27 @@ def render():
             st.info("Settings reset to defaults")
     
     st.info("📝 Settings will be functional once backend integration is complete")
+    
+    st.markdown("---")
+    
+    # Paper Trading Debug
+    with st.expander("🧪 Paper Trading Debug"):
+        st.warning("⚠️ This will inject a FAKE signal into the system")
+        
+        if st.button("Trigger Fake BUY Signal"):
+            service = st.session_state.get('service', None)
+            if service and service.paper_service:
+                fake_signal = TradingSignal(
+                    signal_type=SignalType.BUY,
+                    confidence=0.95,
+                    timestamp=datetime.now(),
+                    price=50000.0,
+                    entry_price=50000.0,
+                    stop_loss=49000.0,
+                    tp_levels={'tp1': 51000.0, 'tp2': 52000.0},
+                    reasons=["Manual Test Signal from Settings"]
+                )
+                service.paper_service.on_signal_received(fake_signal, "BTCUSDT")
+                st.success("✅ Fake Signal Sent! Check 'Paper Trading' tab.")
+            else:
+                st.error("❌ Service not running or Paper Service not initialized")

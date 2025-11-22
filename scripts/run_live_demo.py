@@ -118,7 +118,6 @@ class LiveDemo:
         now = datetime.now()
         
         # Rate limit printing to avoid console spam (every 5 seconds)
-        # Use total_seconds() to ensure we don't print multiple times in the same second if called rapidly
         if (now - self.last_print_time).total_seconds() < 5.0:
             return
             
@@ -129,36 +128,49 @@ class LiveDemo:
             return
             
         timestamp = now.strftime("%H:%M:%S")
-        close = latest_candle.close
         
         # Get latest indicators
         indicators = self.service.get_latest_indicators('1m')
+        indicators_1h = self.service.get_latest_indicators('1h')
         
-        # Default values if not ready
+        # Format output
+        price = f"${latest_candle.close:,.2f}"
+        
+        # VWAP
         vwap = indicators.get('vwap', 0)
-        rsi = indicators.get('rsi', 0)
-        stoch_k = indicators.get('stoch_k', 0)
-        stoch_d = indicators.get('stoch_d', 0)
-        bb_lower = indicators.get('bb_lower', 0)
-        bb_upper = indicators.get('bb_upper', 0)
+        vwap_str = f"${vwap:,.2f}" if vwap > 0 else "N/A"
         
-        # Determine trend icon
-        if vwap > 0:
-            trend_icon = "📈" if close > vwap else "📉"
-            vwap_str = f"${vwap:,.2f}"
-        else:
-            trend_icon = "⏳"
-            vwap_str = "Calculating..."
+        # StochRSI
+        stoch = indicators.get('stoch_rsi', {})
+        stoch_k = stoch.get('k', 0)
+        stoch_d = stoch.get('d', 0)
+        stoch_str = f"{stoch_k:.1f}/{stoch_d:.1f}"
+        
+        # StochRSI 1h
+        stoch_1h = indicators_1h.get('stoch_rsi', {})
+        stoch_k_1h = stoch_1h.get('k', 0)
+        stoch_d_1h = stoch_1h.get('d', 0)
+        stoch_1h_str = f"{stoch_k_1h:.1f}/{stoch_d_1h:.1f}"
+        
+        # Color coding for StochRSI
+        if stoch_k < 20:
+            stoch_str = f"{Colors.GREEN}{stoch_str}{Colors.ENDC}"
+        elif stoch_k > 80:
+            stoch_str = f"{Colors.RED}{stoch_str}{Colors.ENDC}"
             
-        # Determine RSI Color
-        if rsi < 35:
-            rsi_str = f"{Colors.GREEN}{rsi:.1f}{Colors.ENDC}"
+        # Signal
+        latest_signal = self.service.get_current_signals()
+        signal_str = "WAITING"
+        if latest_signal:
+            color = Colors.GREEN if latest_signal.signal_type.value == 'buy' else Colors.RED
+            signal_str = f"{color}{latest_signal.signal_type.value.upper()}{Colors.ENDC}"
+            if latest_signal.entry_price:
+                signal_str += f" @ ${latest_signal.entry_price:,.2f}"
+        
+        print(f"{timestamp} | {price} | VWAP: {vwap_str} | Stoch: {stoch_str} | Stoch(1h): {stoch_1h_str} | {signal_str}")
 
 async def main():
     demo = LiveDemo()
-    
-    # Handle Ctrl+C
-    loop = asyncio.get_running_loop()
     
     try:
         await demo.start()

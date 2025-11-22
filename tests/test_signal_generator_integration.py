@@ -14,6 +14,15 @@ from src.application.signals.signal_generator import SignalGenerator, SignalType
 from src.application.analysis.trend_filter import TrendFilter
 from src.infrastructure.indicators.atr_calculator import ATRCalculator
 from src.infrastructure.indicators.adx_calculator import ADXCalculator
+from src.infrastructure.indicators.vwap_calculator import VWAPCalculator
+from src.infrastructure.indicators.bollinger_calculator import BollingerCalculator
+from src.infrastructure.indicators.stoch_rsi_calculator import StochRSICalculator
+from src.application.services.smart_entry_calculator import SmartEntryCalculator
+from src.infrastructure.indicators.talib_calculator import TALibCalculator
+from src.application.services.tp_calculator import TPCalculator
+from src.application.services.stop_loss_calculator import StopLossCalculator
+from src.application.services.confidence_calculator import ConfidenceCalculator
+from src.infrastructure.indicators.volume_spike_detector import VolumeSpikeDetector
 
 
 def create_test_candles(
@@ -132,33 +141,64 @@ def create_choppy_market_candles(count: int = 100) -> List[Candle]:
 class TestSignalGeneratorIntegration:
     """Integration tests for SignalGenerator with filters"""
     
+    def setup_method(self):
+        """Setup dependencies for tests"""
+        self.vwap_calculator = VWAPCalculator()
+        self.bollinger_calculator = BollingerCalculator()
+        self.stoch_rsi_calculator = StochRSICalculator()
+        self.smart_entry_calculator = SmartEntryCalculator()
+        self.adx_calculator = ADXCalculator()
+        self.atr_calculator = ATRCalculator()
+        self.talib_calculator = TALibCalculator()
+        self.tp_calculator = TPCalculator()
+        self.stop_loss_calculator = StopLossCalculator()
+        self.confidence_calculator = ConfidenceCalculator()
+        self.volume_spike_detector = VolumeSpikeDetector()
+
+    def _create_generator(self, use_filters=True):
+        return SignalGenerator(
+            vwap_calculator=self.vwap_calculator,
+            bollinger_calculator=self.bollinger_calculator,
+            stoch_rsi_calculator=self.stoch_rsi_calculator,
+            smart_entry_calculator=self.smart_entry_calculator,
+            adx_calculator=self.adx_calculator,
+            atr_calculator=self.atr_calculator,
+            talib_calculator=self.talib_calculator,
+            tp_calculator=self.tp_calculator,
+            stop_loss_calculator=self.stop_loss_calculator,
+            confidence_calculator=self.confidence_calculator,
+            volume_spike_detector=self.volume_spike_detector,
+            use_filters=use_filters
+        )
+
     def test_signal_generator_with_filters_enabled(self):
         """Test signal generator with filters enabled"""
-        generator = SignalGenerator(use_filters=True)
+        generator = self._create_generator(use_filters=True)
         
         assert generator.use_filters is True
-        assert generator.trend_filter is not None
         assert generator.adx_calculator is not None
         assert generator.atr_calculator is not None
     
     def test_signal_generator_with_filters_disabled(self):
         """Test signal generator with filters disabled (backward compatibility)"""
-        generator = SignalGenerator(use_filters=False)
+        generator = self._create_generator(use_filters=False)
         
         assert generator.use_filters is False
         # Components still exist but won't be used
-        assert generator.trend_filter is not None
         assert generator.adx_calculator is not None
         assert generator.atr_calculator is not None
     
     def test_buy_signal_passes_trend_filter(self):
         """Test BUY signal passes trend filter in bullish market"""
         candles = create_oversold_bullish_candles(count=100)
-        generator = SignalGenerator(use_filters=True)
+        generator = self._create_generator(use_filters=True)
         
         signal = generator.generate_signal(candles)
         
         # Should generate BUY signal in bullish trend with oversold RSI
+        # Note: With new strategy, we need to ensure Trend Pullback conditions are met
+        # This mock data might not perfectly align with VWAP/BB/Stoch logic, 
+        # so we primarily check that it runs and if a signal is produced, it has correct attributes
         if signal and signal.signal_type == SignalType.BUY:
             assert 'atr' in signal.indicators
             assert signal.indicators['atr'] > 0
@@ -185,7 +225,7 @@ class TestSignalGeneratorIntegration:
             else:
                 modified_candles.append(candle)
         
-        generator = SignalGenerator(use_filters=True)
+        generator = self._create_generator(use_filters=True)
         signal = generator.generate_signal(modified_candles)
         
         # BUY signal should be rejected in bearish trend
@@ -195,7 +235,7 @@ class TestSignalGeneratorIntegration:
     def test_sell_signal_passes_trend_filter(self):
         """Test SELL signal passes trend filter in bearish market"""
         candles = create_overbought_bearish_candles(count=100)
-        generator = SignalGenerator(use_filters=True)
+        generator = self._create_generator(use_filters=True)
         
         signal = generator.generate_signal(candles)
         
@@ -226,7 +266,7 @@ class TestSignalGeneratorIntegration:
             else:
                 modified_candles.append(candle)
         
-        generator = SignalGenerator(use_filters=True)
+        generator = self._create_generator(use_filters=True)
         signal = generator.generate_signal(modified_candles)
         
         # SELL signal should be rejected in bullish trend
@@ -254,7 +294,7 @@ class TestSignalGeneratorIntegration:
             else:
                 modified_candles.append(candle)
         
-        generator = SignalGenerator(use_filters=True)
+        generator = self._create_generator(use_filters=True)
         signal = generator.generate_signal(modified_candles)
         
         # Signal should be rejected due to low ADX
@@ -264,7 +304,7 @@ class TestSignalGeneratorIntegration:
     def test_atr_value_included_in_signal(self):
         """Test ATR value is included in signal indicators"""
         candles = create_oversold_bullish_candles(count=100)
-        generator = SignalGenerator(use_filters=True)
+        generator = self._create_generator(use_filters=True)
         
         signal = generator.generate_signal(candles)
         
@@ -296,7 +336,7 @@ class TestSignalGeneratorIntegration:
             else:
                 modified_candles.append(candle)
         
-        generator = SignalGenerator(use_filters=False)
+        generator = self._create_generator(use_filters=False)
         signal = generator.generate_signal(modified_candles)
         
         # With filters disabled, signal might be generated
@@ -307,7 +347,7 @@ class TestSignalGeneratorIntegration:
     def test_insufficient_candles_for_filters(self):
         """Test handling of insufficient candles for EMA50"""
         candles = create_test_candles(count=30)  # Less than 50
-        generator = SignalGenerator(use_filters=True)
+        generator = self._create_generator(use_filters=True)
         
         signal = generator.generate_signal(candles)
         
@@ -316,18 +356,19 @@ class TestSignalGeneratorIntegration:
     
     def test_custom_filter_components(self):
         """Test signal generator with custom filter components"""
-        trend_filter = TrendFilter(ema_period=50)
         adx_calculator = ADXCalculator(period=14)
         atr_calculator = ATRCalculator(period=14)
         
         generator = SignalGenerator(
-            trend_filter=trend_filter,
+            vwap_calculator=self.vwap_calculator,
+            bollinger_calculator=self.bollinger_calculator,
+            stoch_rsi_calculator=self.stoch_rsi_calculator,
+            smart_entry_calculator=self.smart_entry_calculator,
             adx_calculator=adx_calculator,
             atr_calculator=atr_calculator,
             use_filters=True
         )
         
-        assert generator.trend_filter is trend_filter
         assert generator.adx_calculator is adx_calculator
         assert generator.atr_calculator is atr_calculator
     
@@ -353,7 +394,7 @@ class TestSignalGeneratorIntegration:
             else:
                 modified_candles.append(candle)
         
-        generator = SignalGenerator(use_filters=True)
+        generator = self._create_generator(use_filters=True)
         signal = generator.generate_signal(modified_candles)
         
         # Should generate signal in trending market

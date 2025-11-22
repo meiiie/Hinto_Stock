@@ -1,0 +1,18 @@
+============================================================
+📊 REAL DATA SIMULATION REPORT - 2025-11-22 01:37
+============================================================
+Strategy: PRODUCTION LOGIC (Trend Pullback)
+Data Source: Binance BTCUSDT (15m)
+Candles: 1000
+------------------------------------------------------------
+Initial Balance: $10,000.00
+Final Balance:   $10,000.56
+Total PnL:       $0.56 (0.01%)
+Total Signals:   4
+------------------------------------------------------------
+📝 TRADE LOG:
+[2025-11-12 03:15:00] BUY | Price=103324 | Conf=0.65 | Trend: Price > VWAP (Bullish), Setup: Pullback to Value Area (Lower BB/VWAP), Trigger: StochRSI Cross Up (K=29.5), Candle: Green (Bullish), Smart Entry: $103151.10 (Limit Order), Stop Loss: $101603.84 (atr_based), TP Targets: 3 levels (R:R 1.50), Confidence: 65%
+[2025-11-13 00:45:00] BUY | Price=101855 | Conf=0.65 | Trend: Price > VWAP (Bullish), Setup: Pullback to Value Area (Lower BB/VWAP), Trigger: StochRSI Cross Up (K=8.3), Candle: Green (Bullish), Smart Entry: $101728.99 (Limit Order), Stop Loss: $100203.05 (atr_based), TP Targets: 3 levels (R:R 2.27), Confidence: 65%
+[2025-11-13 11:00:00] BUY | Price=103108 | Conf=0.65 | Trend: Price > VWAP (Bullish), Setup: Pullback to Value Area (Lower BB/VWAP), Trigger: StochRSI Cross Up (K=5.7), Candle: Green (Bullish), Smart Entry: $102749.40 (Limit Order), Stop Loss: $101208.16 (atr_based), TP Targets: 3 levels (R:R 1.50), Confidence: 65%
+[2025-11-13 23:45:00] SELL | Price=99692 | Conf=0.65 | Trend: Price < VWAP (Bearish), Setup: Rally to Value Area (Upper BB/VWAP), Trigger: StochRSI Cross Down (K=90.5), Candle: Red (Bearish), Smart Entry: $100225.54 (Limit Order), Stop Loss: $101806.18 (atr_based), TP Targets: 3 levels (R:R 1.50), Confidence: 65%
+============================================================

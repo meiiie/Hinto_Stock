@@ -101,9 +101,24 @@ def run_backtest(
     sl_calc = StopLossCalculator()
     conf_calc = ConfidenceCalculator()
     
+    # New calculators for DI
+    from src.infrastructure.indicators.vwap_calculator import VWAPCalculator
+    from src.infrastructure.indicators.bollinger_calculator import BollingerCalculator
+    from src.infrastructure.indicators.stoch_rsi_calculator import StochRSICalculator
+    from src.application.services.smart_entry_calculator import SmartEntryCalculator
+    
+    vwap_calc = VWAPCalculator()
+    bb_calc = BollingerCalculator()
+    stoch_calc = StochRSICalculator()
+    smart_entry_calc = SmartEntryCalculator()
+    
     # Use improved strategy with filters but NORMAL mode (not strict)
     signal_generator = SignalGenerator(
         talib_calculator=talib_calc,
+        vwap_calculator=vwap_calc,
+        bollinger_calculator=bb_calc,
+        stoch_rsi_calculator=stoch_calc,
+        smart_entry_calculator=smart_entry_calc,
         entry_calculator=entry_calc,
         tp_calculator=tp_calc,
         stop_loss_calculator=sl_calc,

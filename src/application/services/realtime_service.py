@@ -25,6 +25,12 @@ from .entry_price_calculator import EntryPriceCalculator
 from .tp_calculator import TPCalculator
 from .stop_loss_calculator import StopLossCalculator
 from .confidence_calculator import ConfidenceCalculator
+from .smart_entry_calculator import SmartEntryCalculator
+from ...infrastructure.indicators.volume_spike_detector import VolumeSpikeDetector
+from ...infrastructure.indicators.adx_calculator import ADXCalculator
+from ...infrastructure.indicators.adx_calculator import ADXCalculator
+from ...infrastructure.indicators.atr_calculator import ATRCalculator
+from .paper_trading_service import PaperTradingService
 
 
 class RealtimeService:
@@ -46,7 +52,8 @@ class RealtimeService:
         self,
         symbol: str = 'btcusdt',
         interval: str = '1m',
-        buffer_size: int = 100
+        buffer_size: int = 2000,  # Increased to 2000 for full-day VWAP calculation
+        paper_service: Optional[PaperTradingService] = None
     ):
         """
         Initialize real-time service.
@@ -54,11 +61,12 @@ class RealtimeService:
         Args:
             symbol: Trading pair symbol (default: 'btcusdt')
             interval: WebSocket interval (default: '1m')
-            buffer_size: Size of candle buffers (default: 100)
+            buffer_size: Size of candle buffers (default: 2000)
         """
         self.symbol = symbol
         self.interval = interval
         self.buffer_size = buffer_size
+        self.paper_service = paper_service
         
         # Components
         self.websocket_client = BinanceWebSocketClient()
@@ -67,7 +75,7 @@ class RealtimeService:
         self.volume_analyzer = VolumeAnalyzer(ma_period=20)
         self.rsi_monitor = RSIMonitor(period=6)
         
-        # Initialize calculators
+        # Initialize calculators (Dependency Injection Root)
         self.talib_calculator = TALibCalculator()
         self.vwap_calculator = VWAPCalculator()
         self.bollinger_calculator = BollingerCalculator()
@@ -76,18 +84,25 @@ class RealtimeService:
         self.tp_calculator = TPCalculator()
         self.stop_loss_calculator = StopLossCalculator()
         self.confidence_calculator = ConfidenceCalculator()
+        self.smart_entry_calculator = SmartEntryCalculator()
+        self.volume_spike_detector = VolumeSpikeDetector()
+        self.adx_calculator = ADXCalculator()
+        self.atr_calculator = ATRCalculator()
         
         self.signal_generator = SignalGenerator(
-            volume_analyzer=self.volume_analyzer,
-            rsi_monitor=self.rsi_monitor,
+            # volume_analyzer and rsi_monitor are no longer used by SignalGenerator
+            volume_spike_detector=self.volume_spike_detector,
+            adx_calculator=self.adx_calculator,
+            atr_calculator=self.atr_calculator,
             talib_calculator=self.talib_calculator,
-            vwap_calculator=self.vwap_calculator,
-            bollinger_calculator=self.bollinger_calculator,
-            stoch_rsi_calculator=self.stoch_rsi_calculator,
-            entry_calculator=self.entry_calculator,
+            # entry_calculator is replaced by smart_entry_calculator
             tp_calculator=self.tp_calculator,
             stop_loss_calculator=self.stop_loss_calculator,
             confidence_calculator=self.confidence_calculator,
+            vwap_calculator=self.vwap_calculator,
+            bollinger_calculator=self.bollinger_calculator,
+            stoch_rsi_calculator=self.stoch_rsi_calculator,
+            smart_entry_calculator=self.smart_entry_calculator,
             account_size=10000.0  # Default account size for dashboard
         )
         
@@ -161,29 +176,63 @@ class RealtimeService:
         try:
             self.logger.info("Fetching historical candles...")
             
-            # Fetch last 100 1m candles
-            candles = self.rest_client.get_klines(
+            # 1. Fetch last 100 1m candles
+            candles_1m = self.rest_client.get_klines(
                 symbol=self.symbol,
                 interval=self.interval,
                 limit=100
             )
             
-            if not candles:
-                self.logger.warning("No historical data fetched")
-                return
+            if candles_1m:
+                self.logger.info(f"Loaded {len(candles_1m)} historical 1m candles")
+                # Add to buffer and aggregator
+                for candle in candles_1m:
+                    self._candles_1m.append(candle)
+                    # Feed to aggregator to initialize its state
+                    self.aggregator.add_candle_1m(candle, is_closed=True)
+                
+                # Update latest 1m
+                self._latest_1m = candles_1m[-1]
+            else:
+                self.logger.warning("No historical 1m data fetched")
+
+            # 2. Fetch last 100 15m candles
+            candles_15m = self.rest_client.get_klines(
+                symbol=self.symbol,
+                interval='15m',
+                limit=100
+            )
             
-            self.logger.info(f"Loaded {len(candles)} historical candles")
+            if candles_15m and len(candles_15m) > 1:
+                # Exclude the last candle as it is likely incomplete (still open)
+                completed_15m = candles_15m[:-1]
+                self.logger.info(f"Loaded {len(completed_15m)} historical 15m candles")
+                
+                for candle in completed_15m:
+                    self._candles_15m.append(candle)
+                
+                # Update latest 15m (last completed)
+                self._latest_15m = completed_15m[-1]
             
-            # Add to buffer
-            for candle in candles:
-                self._candles_1m.append(candle)
-                self.aggregator.add_candle_1m(candle, is_closed=True)
+            # 3. Fetch last 100 1h candles
+            candles_1h = self.rest_client.get_klines(
+                symbol=self.symbol,
+                interval='1h',
+                limit=100
+            )
             
-            # Update latest
-            if candles:
-                self._latest_1m = candles[-1]
+            if candles_1h and len(candles_1h) > 1:
+                # Exclude the last candle as it is likely incomplete
+                completed_1h = candles_1h[:-1]
+                self.logger.info(f"Loaded {len(completed_1h)} historical 1h candles")
+                
+                for candle in completed_1h:
+                    self._candles_1h.append(candle)
+                
+                # Update latest 1h (last completed)
+                self._latest_1h = completed_1h[-1]
             
-            self.logger.info(f"✅ Historical data loaded: {len(self._candles_1m)} candles in buffer")
+            self.logger.info(f"✅ Historical data loaded successfully")
             
         except Exception as e:
             self.logger.error(f"Error loading historical data: {e}")
@@ -240,6 +289,14 @@ class RealtimeService:
         
         # Always update latest 1m candle (for real-time display)
         self._latest_1m = candle
+        
+        # Paper Engine Matching (Run on every tick/candle update)
+        if self.paper_service:
+            self.paper_service.process_market_data(
+                current_price=candle.close,
+                high=candle.high,
+                low=candle.low
+            )
         
         # Also add if explicitly closed by Binance
         if is_closed and (not self._candles_1m or candle.timestamp != self._candles_1m[-1].timestamp):
@@ -301,6 +358,10 @@ class RealtimeService:
             if signal and signal.signal_type.value != 'neutral':
                 self._latest_signal = signal
                 self.logger.info(f"Signal generated: {signal}")
+                
+                # Send to Paper Engine
+                if self.paper_service:
+                    self.paper_service.on_signal_received(signal, self.symbol)
                 
                 # Notify signal callbacks
                 self._notify_signal_callbacks(signal)
@@ -429,8 +490,16 @@ class RealtimeService:
                 'volume': [c.volume for c in candles]
             })
             
+            if timeframe == '1h':
+                # Debug logging for 1h timeframe
+                pass
+            
             # Calculate indicators
-            result_df = self.talib_calculator.calculate_all(df)
+            try:
+                result_df = self.talib_calculator.calculate_all(df)
+            except Exception as e:
+                self.logger.error(f"TALib calculation failed for {timeframe}: {e}")
+                result_df = df.copy()
             
             # Calculate additional Trend Pullback indicators
             # VWAP
@@ -456,9 +525,12 @@ class RealtimeService:
             if stoch_result:
                 result_df['stoch_k'] = stoch_result.k_value
                 result_df['stoch_d'] = stoch_result.d_value
+                # Add nested dict for frontend compatibility
+                result_df['stoch_rsi'] = [{'k': stoch_result.k_value, 'd': stoch_result.d_value}] * len(result_df)
             else:
                 result_df['stoch_k'] = 0.0
                 result_df['stoch_d'] = 0.0
+                result_df['stoch_rsi'] = [{'k': 0.0, 'd': 0.0}] * len(result_df)
             
             # Return latest values as dict
             if not result_df.empty:
@@ -468,6 +540,29 @@ class RealtimeService:
                 # Map specific keys for frontend/demo compatibility
                 if 'rsi_6' in latest:
                     latest['rsi'] = latest['rsi_6']
+                
+                # Construct nested objects for Dashboard
+                
+                # 1. Bollinger Bands
+                if bb_result:
+                    latest['bollinger'] = {
+                        'upper_band': bb_result.upper_band,
+                        'middle_band': bb_result.middle_band,
+                        'lower_band': bb_result.lower_band,
+                        'bandwidth': bb_result.bandwidth,
+                        'percent_b': bb_result.percent_b
+                    }
+                
+                # 2. StochRSI
+                if stoch_result:
+                    latest['stoch_rsi'] = {
+                        'k': stoch_result.k_value,
+                        'd': stoch_result.d_value,
+                        'zone': stoch_result.zone.value
+                    }
+                else:
+                    # Debug logging if StochRSI is missing
+                    self.logger.warning(f"StochRSI failed for {timeframe}. Candles: {len(candles)}. Min req: {self.stoch_rsi_calculator.rsi_period + self.stoch_rsi_calculator.stoch_period + self.stoch_rsi_calculator.k_period + self.stoch_rsi_calculator.d_period}")
                     
                 return {k: (v if pd.notna(v) else 0.0) for k, v in latest.items()}
             return {}

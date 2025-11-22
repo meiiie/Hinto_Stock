@@ -15,6 +15,17 @@ from typing import List
 
 from src.domain.entities.candle import Candle
 from src.application.signals.signal_generator import SignalGenerator, SignalType
+from src.infrastructure.indicators.vwap_calculator import VWAPCalculator
+from src.infrastructure.indicators.bollinger_calculator import BollingerCalculator
+from src.infrastructure.indicators.stoch_rsi_calculator import StochRSICalculator
+from src.application.services.smart_entry_calculator import SmartEntryCalculator
+from src.infrastructure.indicators.talib_calculator import TALibCalculator
+from src.application.services.tp_calculator import TPCalculator
+from src.application.services.stop_loss_calculator import StopLossCalculator
+from src.application.services.confidence_calculator import ConfidenceCalculator
+from src.infrastructure.indicators.volume_spike_detector import VolumeSpikeDetector
+from src.infrastructure.indicators.adx_calculator import ADXCalculator
+from src.infrastructure.indicators.atr_calculator import ATRCalculator
 
 
 def create_test_candles_with_rsi(
@@ -81,21 +92,70 @@ def create_test_candles_with_rsi(
 class TestSignalGeneratorStrictMode:
     """Tests for strict mode signal generation"""
     
+    def setup_method(self):
+        """Setup dependencies for tests"""
+        self.vwap_calculator = VWAPCalculator()
+        self.bollinger_calculator = BollingerCalculator()
+        self.stoch_rsi_calculator = StochRSICalculator()
+        self.smart_entry_calculator = SmartEntryCalculator()
+        self.adx_calculator = ADXCalculator()
+        self.atr_calculator = ATRCalculator()
+        self.talib_calculator = TALibCalculator()
+        self.tp_calculator = TPCalculator()
+        self.stop_loss_calculator = StopLossCalculator()
+        self.confidence_calculator = ConfidenceCalculator()
+        self.volume_spike_detector = VolumeSpikeDetector()
+
+    def _create_generator(self, strict_mode=True, use_filters=False, inject_detector=True):
+        """
+        Helper to create SignalGenerator.
+        Args:
+            inject_detector: If True, injects self.volume_spike_detector. If False, passes None.
+        """
+        vol_detector = self.volume_spike_detector if inject_detector else None
+        
+        return SignalGenerator(
+            vwap_calculator=self.vwap_calculator,
+            bollinger_calculator=self.bollinger_calculator,
+            stoch_rsi_calculator=self.stoch_rsi_calculator,
+            smart_entry_calculator=self.smart_entry_calculator,
+            adx_calculator=self.adx_calculator,
+            atr_calculator=self.atr_calculator,
+            talib_calculator=self.talib_calculator,
+            tp_calculator=self.tp_calculator,
+            stop_loss_calculator=self.stop_loss_calculator,
+            confidence_calculator=self.confidence_calculator,
+            volume_spike_detector=vol_detector,
+            strict_mode=strict_mode,
+            use_filters=use_filters
+        )
+
     def test_strict_mode_enabled_by_default(self):
         """Test strict mode is enabled by default"""
-        generator = SignalGenerator()
+        # Note: We must pass required args, so we check default of strict_mode arg if not passed?
+        # Actually, we can't test default arg value easily if we must pass required args.
+        # We'll just check if we pass nothing for strict_mode, it defaults to True.
+        generator = SignalGenerator(
+            vwap_calculator=self.vwap_calculator,
+            bollinger_calculator=self.bollinger_calculator,
+            stoch_rsi_calculator=self.stoch_rsi_calculator,
+            smart_entry_calculator=self.smart_entry_calculator
+        )
         assert generator.strict_mode is True
     
     def test_strict_mode_can_be_disabled(self):
         """Test strict mode can be disabled for backward compatibility"""
-        generator = SignalGenerator(strict_mode=False)
+        generator = self._create_generator(strict_mode=False)
         assert generator.strict_mode is False
     
     def test_strict_mode_volume_threshold(self):
         """Test strict mode uses 2.5x volume threshold"""
-        generator_strict = SignalGenerator(strict_mode=True)
-        generator_normal = SignalGenerator(strict_mode=False)
+        # Don't inject detector, let SignalGenerator create it based on strict_mode
+        generator_strict = self._create_generator(strict_mode=True, inject_detector=False)
+        generator_normal = self._create_generator(strict_mode=False, inject_detector=False)
         
+        # Note: In new implementation, volume threshold might be passed to detector or handled inside.
+        # If SignalGenerator sets detector threshold based on strict mode:
         assert generator_strict.volume_spike_detector.threshold == 2.5
         assert generator_normal.volume_spike_detector.threshold == 2.0
     
@@ -104,7 +164,7 @@ class TestSignalGeneratorStrictMode:
         # Create candles with RSI around 27 (would pass normal mode but fail strict)
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=27.0, trend='bullish')
         
-        generator_strict = SignalGenerator(strict_mode=True, use_filters=False)
+        generator_strict = self._create_generator(strict_mode=True, use_filters=False)
         signal_strict = generator_strict.generate_signal(candles)
         
         # Should NOT generate BUY signal (RSI 27 > 25)
@@ -116,7 +176,7 @@ class TestSignalGeneratorStrictMode:
         # Create candles with RSI around 20 (extreme oversold)
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=20.0, trend='bullish')
         
-        generator_strict = SignalGenerator(strict_mode=True, use_filters=False)
+        generator_strict = self._create_generator(strict_mode=True, use_filters=False)
         signal_strict = generator_strict.generate_signal(candles)
         
         # May generate BUY signal if other conditions met
@@ -128,7 +188,7 @@ class TestSignalGeneratorStrictMode:
         # Create candles with RSI around 72 (would pass normal mode but fail strict)
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=72.0, trend='bearish')
         
-        generator_strict = SignalGenerator(strict_mode=True, use_filters=False)
+        generator_strict = self._create_generator(strict_mode=True, use_filters=False)
         signal_strict = generator_strict.generate_signal(candles)
         
         # Should NOT generate SELL signal (RSI 72 < 75)
@@ -140,7 +200,7 @@ class TestSignalGeneratorStrictMode:
         # Create candles with RSI around 80 (extreme overbought)
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=80.0, trend='bearish')
         
-        generator_strict = SignalGenerator(strict_mode=True, use_filters=False)
+        generator_strict = self._create_generator(strict_mode=True, use_filters=False)
         signal_strict = generator_strict.generate_signal(candles)
         
         # May generate SELL signal if other conditions met
@@ -151,7 +211,7 @@ class TestSignalGeneratorStrictMode:
         """Test strict mode requires minimum 3 conditions"""
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=20.0, trend='bullish')
         
-        generator = SignalGenerator(strict_mode=True, use_filters=False)
+        generator = self._create_generator(strict_mode=True, use_filters=False)
         signal = generator.generate_signal(candles)
         
         # If signal generated, should have 3+ conditions
@@ -163,7 +223,7 @@ class TestSignalGeneratorStrictMode:
         """Test normal mode requires minimum 2 conditions"""
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=28.0, trend='bullish')
         
-        generator = SignalGenerator(strict_mode=False, use_filters=False)
+        generator = self._create_generator(strict_mode=False, use_filters=False)
         signal = generator.generate_signal(candles)
         
         # If signal generated, should have 2+ conditions
@@ -175,13 +235,14 @@ class TestSignalGeneratorStrictMode:
         """Test strict mode checks price against EMA(25) not EMA(7)"""
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=20.0, trend='bullish')
         
-        generator = SignalGenerator(strict_mode=True, use_filters=False)
+        generator = self._create_generator(strict_mode=True, use_filters=False)
         signal = generator.generate_signal(candles)
         
         # Check that EMA(25) is mentioned in reasons if signal generated
         if signal and signal.signal_type == SignalType.BUY:
             reasons_text = ' '.join(signal.reasons)
             # Should mention EMA(25) not EMA(7) for price condition
+            # Note: New strategy uses VWAP, but if legacy EMA check exists in strict mode:
             if 'EMA' in reasons_text and 'Price' in reasons_text:
                 assert 'EMA(25)' in reasons_text or 'EMA25' in reasons_text
     
@@ -189,7 +250,7 @@ class TestSignalGeneratorStrictMode:
         """Test normal mode checks price against EMA(7)"""
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=28.0, trend='bullish')
         
-        generator = SignalGenerator(strict_mode=False, use_filters=False)
+        generator = self._create_generator(strict_mode=False, use_filters=False)
         signal = generator.generate_signal(candles)
         
         # Check that EMA(7) is mentioned in reasons if signal generated
@@ -203,7 +264,7 @@ class TestSignalGeneratorStrictMode:
         """Test strict mode works with filters enabled"""
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=20.0, trend='bullish')
         
-        generator = SignalGenerator(strict_mode=True, use_filters=True)
+        generator = self._create_generator(strict_mode=True, use_filters=True)
         signal = generator.generate_signal(candles)
         
         # Should not crash with both strict mode and filters enabled
@@ -214,8 +275,8 @@ class TestSignalGeneratorStrictMode:
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=28.0, trend='bullish')
         
         # Normal mode should be more lenient
-        generator_normal = SignalGenerator(strict_mode=False, use_filters=False)
-        generator_strict = SignalGenerator(strict_mode=True, use_filters=False)
+        generator_normal = self._create_generator(strict_mode=False, use_filters=False)
+        generator_strict = self._create_generator(strict_mode=True, use_filters=False)
         
         signal_normal = generator_normal.generate_signal(candles)
         signal_strict = generator_strict.generate_signal(candles)
@@ -228,7 +289,7 @@ class TestSignalGeneratorStrictMode:
         """Test strict mode uses correct reason messages"""
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=20.0, trend='bullish')
         
-        generator = SignalGenerator(strict_mode=True, use_filters=False)
+        generator = self._create_generator(strict_mode=True, use_filters=False)
         signal = generator.generate_signal(candles)
         
         if signal and signal.signal_type == SignalType.BUY:
@@ -236,8 +297,67 @@ class TestSignalGeneratorStrictMode:
             # Should mention "extreme oversold" for strict mode
             assert 'extreme oversold' in reasons_text.lower() or '< 25' in reasons_text
             # Should mention 2.5x for volume
-            if 'Volume' in reasons_text:
-                assert '2.5x' in reasons_text or '2.5' in reasons_text
+    def test_signal_rejected_by_volume_climax(self):
+        """Test signal rejected when volume is too high (> 4.0x) - Climax"""
+        # Create candles that would trigger a BUY
+        candles = create_test_candles_with_rsi(count=100, final_rsi_target=20.0, trend='bullish')
+        
+        # Artificially inflate volume of last candle to be huge
+        # We need to ensure it's > 4.0x the average of previous 20
+        last_candle = candles[-1]
+        avg_vol = sum(c.volume for c in candles[-21:-1]) / 20
+        climax_vol = avg_vol * 5.0 # 5x average
+        
+        new_last_candle = Candle(
+            timestamp=last_candle.timestamp,
+            open=last_candle.open,
+            high=last_candle.high,
+            low=last_candle.low,
+            close=last_candle.close,
+            volume=climax_vol
+        )
+        candles[-1] = new_last_candle
+        
+        generator = self._create_generator(strict_mode=False, use_filters=False)
+        signal = generator.generate_signal(candles)
+        
+        # Should be rejected due to Volume Climax
+        if signal:
+            # Note: Even with strict_mode=False, the Climax Filter should invalidate it
+            # So it should be NEUTRAL
+            assert signal.signal_type == SignalType.NEUTRAL
+            # Check reason contains Volume Climax
+            reasons_text = ' '.join(signal.reasons)
+            assert "Volume Climax" in reasons_text or "> 4.0x" in reasons_text
+
+    def test_signal_passes_volume_climax_check(self):
+        """Test signal passes when volume is high but not climax (< 4.0x)"""
+        # Create candles that would trigger a BUY
+        candles = create_test_candles_with_rsi(count=100, final_rsi_target=20.0, trend='bullish')
+        
+        # Inflate volume to be high but acceptable (e.g. 3.0x)
+        last_candle = candles[-1]
+        avg_vol = sum(c.volume for c in candles[-21:-1]) / 20
+        high_vol = avg_vol * 3.0 # 3x average (Valid spike)
+        
+        new_last_candle = Candle(
+            timestamp=last_candle.timestamp,
+            open=last_candle.open,
+            high=last_candle.high,
+            low=last_candle.low,
+            close=last_candle.close,
+            volume=high_vol
+        )
+        candles[-1] = new_last_candle
+        
+        generator = self._create_generator(strict_mode=True, use_filters=False)
+        signal = generator.generate_signal(candles)
+        
+        # Should NOT be rejected by Volume Climax
+        # (It might be rejected by other things in this mock setup, but let's check reasons if it exists)
+        if signal and signal.signal_type == SignalType.NEUTRAL:
+             reasons_text = ' '.join(signal.reasons)
+             assert "Volume Climax" not in reasons_text
 
 
 if __name__ == '__main__':

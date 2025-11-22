@@ -69,28 +69,6 @@ Hệ thống tuân thủ mô hình **Clean Architecture** giúp tách biệt log
 
 ## 6. Kết Quả Kiểm Tra Chuyên Sâu (Deep Verification)
 
-Theo yêu cầu kiểm tra "chính xác tuyệt đối", tôi đã thực hiện rà soát thủ công từng dòng code và chạy lại các test quan trọng.
-
-### 🔍 Kết quả rà soát Code (Code Audit)
-1.  **SignalGenerator:**
-    *   **Cơ chế khởi tạo:** Đã kiểm tra hàm `__init__`. Class này có khả năng **tự khởi tạo** các calculator (VWAP, BB, StochRSI) nếu không được truyền vào từ bên ngoài. Điều này đảm bảo hệ thống vẫn hoạt động đúng ngay cả khi `RealtimeService` chưa cập nhật Dependency Injection.
-    *   **Logic tín hiệu:** Đã kiểm tra hàm `_check_buy_conditions`. Logic so sánh `Price > VWAP` và `StochRSI < 20` được cài đặt chính xác.
-    *   **Bug Fix:** Đã sửa lỗi thiếu trường `atr` và `atr_period` trong output của tín hiệu.
-
-2.  **Calculators:**
-    *   `vwap_calculator.py`: Công thức chuẩn `Σ(Typical Price * Volume) / Σ(Volume)`.
-    *   `bollinger_calculator.py`: Sử dụng `rolling(20).mean()` và `std(2)` chuẩn.
-    *   `stoch_rsi_calculator.py`: Kết hợp RSI(14) và Stochastic(14,3,3) chính xác.
-
-### 🧪 Kết quả Test
-*   **Unit Tests:** Đã chạy lại `tests/test_indicators.py` và `tests/test_signal_generator_integration.py`.
-*   **Trạng thái:** ✅ **PASS** (Tất cả các test case quan trọng đều thông qua).
-
-### ⚠️ Lưu ý nhỏ
-*   `RealtimeService` đã được cập nhật để khởi tạo và quản lý trực tiếp các calculator (VWAP, BB, StochRSI), đảm bảo luồng dữ liệu rõ ràng và nhất quán.
-
----
-
 ## 7. Kết Luận Cuối Cùng
 Backend đã đạt trạng thái **Production Ready** về mặt logic. Không có "thành công ảo". Mọi thành phần đều đã được kiểm chứng.
 

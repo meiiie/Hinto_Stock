@@ -1,0 +1,31 @@
+============================================================
+📊 REAL DATA SIMULATION REPORT - 2025-11-22 00:52
+============================================================
+Strategy: Trend Pullback (VWAP + RSI)
+Data Source: Binance BTCUSDT (15m)
+Candles: 1000
+------------------------------------------------------------
+Initial Balance: $10,000.00
+Final Balance:   $9,644.06
+Total PnL:       $-355.94 (-3.56%)
+Total Signals:   17
+------------------------------------------------------------
+📝 TRADE LOG:
+[2025-11-12 00:15:00] SELL (Trend Pullback) | Price=103075 < VWAP=103953 | RSI=57.8
+[2025-11-12 14:30:00] BUY (Trend Pullback) | Price=104694 > VWAP=103973 | RSI=39.3
+[2025-11-12 14:45:00] BUY (Trend Pullback) | Price=103990 > VWAP=103979 | RSI=32.0
+[2025-11-12 20:15:00] SELL (Trend Pullback) | Price=101717 < VWAP=103542 | RSI=56.6
+[2025-11-13 01:00:00] SELL (Trend Pullback) | Price=102399 < VWAP=103424 | RSI=60.0
+[2025-11-13 03:15:00] SELL (Trend Pullback) | Price=102124 < VWAP=103350 | RSI=55.2
+[2025-11-13 05:45:00] SELL (Trend Pullback) | Price=103136 < VWAP=103293 | RSI=63.2
+[2025-11-13 12:30:00] SELL (Trend Pullback) | Price=103178 < VWAP=103294 | RSI=60.6
+[2025-11-13 22:00:00] SELL (Trend Pullback) | Price=99302 < VWAP=102296 | RSI=58.9
+[2025-11-13 23:15:00] SELL (Trend Pullback) | Price=100232 < VWAP=102242 | RSI=73.3
+[2025-11-14 15:30:00] SELL (Trend Pullback) | Price=96784 < VWAP=100470 | RSI=61.4
+[2025-11-14 16:30:00] SELL (Trend Pullback) | Price=97112 < VWAP=100405 | RSI=74.3
+[2025-11-15 00:00:00] SELL (Trend Pullback) | Price=95214 < VWAP=99990 | RSI=60.1
+[2025-11-15 01:45:00] SELL (Trend Pullback) | Price=95650 < VWAP=99924 | RSI=55.1
+[2025-11-15 02:45:00] SELL (Trend Pullback) | Price=96483 < VWAP=99893 | RSI=80.0
+[2025-11-16 02:45:00] SELL (Trend Pullback) | Price=95964 < VWAP=99496 | RSI=57.2
+[2025-11-16 09:45:00] SELL (Trend Pullback) | Price=96630 < VWAP=99431 | RSI=70.1
+============================================================

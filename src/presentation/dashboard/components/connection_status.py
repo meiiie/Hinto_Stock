@@ -69,7 +69,8 @@ def render_connection_status(service: RealtimeService) -> None:
         with col2:
             # Display latency
             if is_connected:
-                latency_str = format_latency(latency_ms)
+                # Use absolute value to handle potential timezone differences
+                latency_str = format_latency(abs(latency_ms))
                 
                 # Warning for high latency
                 if latency_ms > 5000:

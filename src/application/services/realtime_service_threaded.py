@@ -12,6 +12,7 @@ from typing import Optional, Dict, List, Callable
 from datetime import datetime
 
 from .realtime_service import RealtimeService
+from .paper_trading_service import PaperTradingService
 from ...domain.entities.candle import Candle
 from ..signals import TradingSignal
 
@@ -24,7 +25,7 @@ class ThreadedRealtimeService:
     Provides synchronous API for Streamlit to interact with.
     """
     
-    def __init__(self, symbol: str = 'btcusdt', interval: str = '1m', buffer_size: int = 100):
+    def __init__(self, symbol: str = 'btcusdt', interval: str = '1m', buffer_size: int = 100, paper_service: Optional[PaperTradingService] = None):
         """
         Initialize threaded service.
         
@@ -36,6 +37,7 @@ class ThreadedRealtimeService:
         self.symbol = symbol
         self.interval = interval
         self.buffer_size = buffer_size
+        self.paper_service = paper_service
         
         # Background thread and event loop
         self._thread: Optional[threading.Thread] = None
@@ -88,7 +90,9 @@ class ThreadedRealtimeService:
             self._service = RealtimeService(
                 symbol=self.symbol,
                 interval=self.interval,
-                buffer_size=self.buffer_size
+
+                buffer_size=self.buffer_size,
+                paper_service=self.paper_service
             )
             
             # Start service (async)
@@ -147,6 +151,12 @@ class ThreadedRealtimeService:
         if not self._service:
             return []
         return self._service.get_candles(timeframe, limit)
+    
+    def get_latest_indicators(self, timeframe: str = '1m') -> Dict:
+        """Get latest calculated indicators."""
+        if not self._service:
+            return {}
+        return self._service.get_latest_indicators(timeframe)
     
     def get_current_signals(self) -> Optional[TradingSignal]:
         """Get current trading signal."""

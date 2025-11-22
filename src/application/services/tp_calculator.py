@@ -176,7 +176,7 @@ class TPCalculator:
         )
         
         if not resistances:
-            self.logger.warning("No resistance levels found for BUY TP calculation")
+            self.logger.debug("No resistance levels found for BUY TP calculation")
             # Fallback: use percentage-based TPs
             return self._calculate_fallback_buy_tp(entry_price, stop_loss)
         
@@ -253,7 +253,7 @@ class TPCalculator:
         )
         
         if not supports:
-            self.logger.warning("No support levels found for SELL TP calculation")
+            self.logger.debug("No support levels found for SELL TP calculation")
             # Fallback: use percentage-based TPs
             return self._calculate_fallback_sell_tp(entry_price, stop_loss)
         

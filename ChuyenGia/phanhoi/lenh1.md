@@ -1,0 +1,1 @@
+cmd /c .venv\Scripts\activate && pytest tests/test_signal_generator_strict.py

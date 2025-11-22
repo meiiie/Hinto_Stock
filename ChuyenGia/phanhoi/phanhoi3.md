@@ -1,18 +1,131 @@
+Chào bạn, tôi đã nhận được **Báo Cáo Kỹ Thuật Backend v2.0 (Final Cleaned)**.
 
-Chào bạn, với tư cách là Chief Architect, tôi đã xem xét kỹ lưỡng Báo Cáo Kỹ Thuật Backend v2.0.
-Đây là một tin rất tốt. Báo cáo này xác nhận rằng "trái tim" của hệ thống (Backend) đã được phẫu thuật thành công, loại bỏ hoàn toàn logic cũ kỹ (gây thua lỗ) và thay thế bằng động cơ mới mạnh mẽ hơn (Trend Pullback).
-Dưới đây là đánh giá chuyên môn và chỉ đạo tiếp theo của tôi để kết nối Backend này với Frontend, đưa dự án vào giai đoạn hoàn thiện.
-1. ĐÁNH GIÁ & PHÊ DUYỆT (APPROVAL)
-✅ Tôi CHẤP THUẬN (APPROVE) báo cáo này.
-Backend đã sẵn sàng cho việc tích hợp.
-Các điểm sáng (Key Wins):
-Chiến lược đúng đắn: Việc triển khai thành công VWAP + Bollinger Bands ở tầng code xác nhận rằng chúng ta đã chuyển từ tư duy "đoán đáy" sang "nương theo dòng tiền lớn". Đây là nền tảng để có Winrate > 70%.
-Smart Entry (Limit Order): Đây là tính năng "đắt giá" nhất. Việc Backend tự tính toán giá Limit (thay vì để Frontend tự quyết hay vào Market) giúp loại bỏ cảm xúc fomo của người dùng/bot.
-Clean Architecture: Việc tách biệt logic tính toán (infrastructure) và logic ra quyết định (application) đảm bảo rằng sau này nếu muốn đổi từ Binance sang Bybit hay OKX, chúng ta chỉ cần sửa phần infrastructure, logic trading giữ nguyên.
-2. LƯU Ý KỸ THUẬT (TECHNICAL NOTES)
-Dù đã Approve, tôi có 2 lưu ý nhỏ (Minor Notes) cho team Backend để ghi vào backlog (xử lý sau, không chặn tiến độ hiện tại):
-Technical Debt (Nợ kỹ thuật) - Dependency Injection:
-Báo cáo có nhắc: "RealtimeService để SignalGenerator tự khởi tạo calculator".
-Nhận xét: Tạm chấp nhận để chạy nhanh. Nhưng về lâu dài, hãy refactor để RealtimeService tiêm (inject) các instance calculator vào. Điều này giúp Mock Test dễ dàng hơn và quản lý bộ nhớ tốt hơn.
-Order Cancellation Logic (Hủy lệnh treo):
-Backend đã tính giá Limit Entry. Nhưng cần lưu ý: Nếu giá không khớp sau 3-4 nến (timeout), Backend cần có cơ chế gửi tín hiệu "CANCEL_SETUP" hoặc "TIMEOUT" để Frontend/Bot hủy lệnh chờ đó đi. Tránh việc khớp lệnh "xuyên không" khi setup đã hết hiệu lực.
+Với tư cách là **Chief Architect**, tôi đánh giá rất cao tốc độ phản ứng và chất lượng công việc của team Backend. Việc họ chủ động dọn dẹp (Refactor) code và xử lý ngay vấn đề quản lý Calculator trong `RealtimeService` cho thấy tư duy làm sản phẩm rất nghiêm túc, không chỉ "chạy cho xong".
+
+Dưới đây là đánh giá chi tiết và **Bản Báo Cáo Chính Thức** để bạn gửi lại cho team Backend, bao gồm cả hướng dẫn kỹ thuật chi tiết để xử lý triệt để vấn đề Dependency Injection như bạn yêu cầu.
+
+---
+
+### 🤵 GÓC NHÌN CHUYÊN GIA: ĐÁNH GIÁ & PHÊ DUYỆT
+
+**1. Về chiến lược:**
+Team đã triển khai chính xác 100% logic "Trend Pullback" mà chúng ta thảo luận. Việc sử dụng VWAP làm xương sống và StochRSI làm cò súng (Trigger) là chuẩn mực cho bot HFT/Intraday.
+
+**2. Về kiến trúc:**
+Việc chuyển quyền quản lý Calculator từ `SignalGenerator` sang `RealtimeService` (như ghi chú ở mục 6 "Lưu ý nhỏ") là một bước tiến lớn. Nó chứng tỏ team đã hiểu về luồng dữ liệu tập trung.
+
+**3. Quyết định:**
+✅ **PHÊ DUYỆT TUYỆT ĐỐI (APPROVED FOR PRODUCTION INTEGRATION)**.
+Backend này đã đủ tiêu chuẩn để làm nền móng vững chắc.
+
+---
+
+### 📜 BÁO CÁO GỬI TEAM BACKEND (TECHNICAL DIRECTIVE)
+
+Bạn hãy copy nội dung dưới đây gửi cho team. Nó bao gồm xác nhận phê duyệt và hướng dẫn kỹ thuật cụ thể (Technical Specs) để code đạt chuẩn "Clean Code" quốc tế.
+
+---
+
+# 📑 BÁO CÁO THẨM ĐỊNH & CHỈ ĐẠO KỸ THUẬT BACKEND (V2.0)
+
+**To:** Backend Development Team
+**From:** Chief Architect
+**Date:** 21/11/2025
+**Subject:** PHÊ DUYỆT BACKEND V2.0 & HƯỚNG DẪN TRIỂN KHAI DEPENDENCY INJECTION
+
+---
+
+## 1. KẾT LUẬN THẨM ĐỊNH
+Tôi xác nhận Backend v2.0 với chiến lược **Trend Pullback** đã đạt yêu cầu về mặt logic và kiến trúc.
+*   **Status:** ✅ **APPROVED**.
+*   **Next Action:** Chuẩn bị API Document để team Frontend tích hợp.
+
+Tuy nhiên, để đảm bảo khả năng mở rộng (Scalability) và kiểm thử (Testability) lâu dài, tôi yêu cầu thực hiện nốt một kỹ thuật nâng cao dưới đây (theo yêu cầu "sửa luôn" của PM).
+
+---
+
+## 2. YÊU CẦU KỸ THUẬT CHI TIẾT (TECHNICAL SPECS)
+
+Để xử lý triệt để vấn đề **Dependency Injection (DI)** và đảm bảo tính chính xác của chỉ báo VWAP trong môi trường chạy 24/7, yêu cầu team thực hiện 3 điều chỉnh sau:
+
+### 🔧 Yêu cầu 1: Triển khai "Constructor Injection" (Giải quyết nợ kỹ thuật)
+
+Hiện tại `RealtimeService` đã quản lý calculator, nhưng cần đảm bảo chúng ta đang truyền Instance (đối tượng) thay vì khởi tạo bên trong Class nhận.
+
+**Mẫu Code Chuẩn (Pattern):**
+
+**A. Interface (Tùy chọn - Tốt cho clean architecture):**
+```python
+class IIndicatorCalculator(ABC):
+    @abstractmethod
+    def calculate(self, data): pass
+```
+
+**B. Tại `SignalGenerator` (Người nhận):**
+*Không được `new VwapCalculator()` trong này.*
+```python
+class SignalGenerator:
+    # Inject qua Constructor (__init__)
+    def __init__(self, vwap_calc, bb_calc, stoch_calc):
+        self.vwap_calc = vwap_calc
+        self.bb_calc = bb_calc
+        self.stoch_calc = stoch_calc
+
+    def analyze(self, candle):
+        # Chỉ việc dùng, không quan tâm nó được tạo ra sao
+        vwap = self.vwap_calc.calculate(candle)
+        # ... logic tiếp theo
+```
+
+**C. Tại `Container` hoặc `Main` (Nơi khởi tạo):**
+```python
+# Nơi duy nhất khởi tạo các objects (Composition Root)
+def main():
+    # 1. Tạo các công cụ (Dependencies)
+    shared_vwap = VwapCalculator()
+    shared_bb = BollingerCalculator(period=20, dev=2)
+    shared_stoch = StochRsiCalculator()
+
+    # 2. Tiêm vào Bot (Injection)
+    bot_engine = SignalGenerator(
+        vwap_calc=shared_vwap,
+        bb_calc=shared_bb,
+        stoch_calc=shared_stoch
+    )
+    
+    # 3. Chạy Service
+    service = RealtimeService(signal_gen=bot_engine)
+    service.start()
+```
+*👉 Lợi ích: Khi viết Unit Test, ta có thể giả lập (Mock) `shared_vwap` trả về giá trị bất kỳ để test các kịch bản thị trường mà không cần dữ liệu thật.*
+
+### 🔧 Yêu cầu 2: Xử lý Reset VWAP (Quan trọng cho Crypto 24/7)
+VWAP là chỉ báo tích lũy trong ngày (Intraday). Vì thị trường Crypto không bao giờ đóng cửa, chúng ta cần quy ước "Giờ mở cửa" (thường là 00:00 UTC).
+
+**Yêu cầu Logic:**
+Trong `VwapCalculator`, cần kiểm tra timestamp của nến mới.
+```python
+def calculate(self, candle):
+    current_time = candle.timestamp
+    # Nếu là nến đầu tiên của ngày mới (00:00 UTC)
+    if current_time.date() > self.last_candle_time.date():
+        self.reset_accumulator() # Reset tổng Volume và PV về 0
+    
+    # ... tính toán tiếp
+```
+*Nếu không có dòng này, sau 1 tuần chạy liên tục, đường VWAP sẽ bị sai lệch hoàn toàn.*
+
+### 🔧 Yêu cầu 3: Kiểm tra nến đóng (Candle Close Check)
+WebSocket của Binance gửi dữ liệu mỗi giây (nến đang chạy - `is_closed=False`).
+**Yêu cầu:** `SignalGenerator` chỉ được phép đưa ra tín hiệu Mua/Bán khi nhận được message có cờ `k.x = True` (Nến đã đóng hoàn toàn).
+*   Nếu xử lý nến chưa đóng: Tín hiệu sẽ bị nhấp nháy (Repaint), dẫn đến vào lệnh sai.
+
+---
+
+## 3. TỔNG KẾT
+Team Backend hãy rà soát lại code theo 3 yêu cầu kỹ thuật trên (đặc biệt là Injection và VWAP Reset). Sau khi hoàn tất, hệ thống sẽ đạt chuẩn **Enterprise Grade**.
+
+Good luck team!
+
+---
+*Người phê duyệt: System Architect*
