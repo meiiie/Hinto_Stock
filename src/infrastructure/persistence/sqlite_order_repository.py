@@ -163,6 +163,15 @@ class SQLiteOrderRepository(IOrderRepository):
             close_time=datetime.fromisoformat(row['close_time']) if row['close_time'] else None,
             realized_pnl=row['realized_pnl'],
             exit_reason=row['exit_reason'],
-            highest_price=highest_price,
             lowest_price=lowest_price
         )
+
+    def reset_database(self) -> None:
+        """Reset database (Clear all data)"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Clear tables
+            cursor.execute("DELETE FROM paper_positions")
+            # Reset account balance
+            cursor.execute("UPDATE paper_account SET balance = 10000.0 WHERE id = 1")
+            conn.commit()

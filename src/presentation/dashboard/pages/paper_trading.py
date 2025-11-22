@@ -17,6 +17,8 @@ def render():
                 current_price = latest_candle.close
     
     # Render with real-time price
+    # (Reset Button moved to bottom)
+
     portfolio.render(current_price=current_price)
     
     # Auto-refresh controls
@@ -33,3 +35,14 @@ def render():
     if not auto_refresh:
         if st.button("🔄 Refresh Data"):
             st.rerun()
+
+    st.markdown("---")
+    with st.expander("⚠️ Danger Zone"):
+        st.warning("This action will delete all trade history and reset your balance to $10,000.")
+        if st.button("🗑️ Reset Paper Trading Data", type="primary"):
+            if 'service' in st.session_state and st.session_state.service:
+                service = st.session_state.service
+                if hasattr(service, 'paper_service'):
+                    service.paper_service.reset_account()
+                    st.toast("✅ Paper Trading Data Reset!", icon="🗑️")
+                    st.rerun()

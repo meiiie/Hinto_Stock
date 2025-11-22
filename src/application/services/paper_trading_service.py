@@ -174,6 +174,11 @@ class PaperTradingService:
             return True
         return False
 
+    def reset_account(self) -> None:
+        """Reset paper trading account and data"""
+        self.repo.reset_database()
+        logger.info("🔄 PAPER TRADING RESET: Database cleared and balance reset to $10,000")
+
     def process_market_data(self, current_price: float, high: float, low: float) -> None:
         """
         1. Check PENDING orders -> Fill if price hit (Merge if needed) OR TTL Expire.
