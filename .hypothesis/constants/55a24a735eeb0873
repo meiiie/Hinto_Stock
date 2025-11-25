@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\infrastructure\indicators\atr_calculator.py
+# hypothesis_version: 6.148.2
+
+[0.0, 1.5, 2.0, 2.25, 2.5, 2.75, 3.0, 3.5, 4.0, '15m', '1d', '1h', '1m', '2h', '30m', '4h', '5m']

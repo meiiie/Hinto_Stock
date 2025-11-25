@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\infrastructure\persistence\sqlite_order_repository.py
+# hypothesis_version: 6.148.2
+
+[0.0, 10000.0, 'balance', 'close_time', 'entry_price', 'exit_reason', 'highest_price', 'id', 'key', 'leverage', 'liquidation_price', 'lowest_price', 'margin', 'open_time', 'quantity', 'realized_pnl', 'side', 'status', 'stop_loss', 'symbol', 'take_profit', 'value']

@@ -477,6 +477,13 @@ class RealtimeService:
             Dict with indicator values (rsi, ema_7, ema_25, etc.)
         """
         candles = self.get_candles(timeframe, limit=100)
+        
+        # CRITICAL FIX: Append current forming candle for real-time price
+        if timeframe == '1m' and self._latest_1m:
+            # Only append if it's not already in the list (timestamps match)
+            if not candles or candles[-1].timestamp != self._latest_1m.timestamp:
+                candles.append(self._latest_1m)
+                
         if not candles or len(candles) < 20:
             return {}
             
@@ -569,6 +576,87 @@ class RealtimeService:
         except Exception as e:
             self.logger.error(f"Error calculating indicators: {e}")
             return {}
+
+    def get_historical_data_with_indicators(self, timeframe: str = '1m', limit: int = 1000) -> List[Dict]:
+        """
+        Get historical candles with calculated indicators.
+        
+        Args:
+            timeframe: '1m', '15m', or '1h'
+            limit: Number of candles
+            
+        Returns:
+            List of dicts with candle data and indicators
+        """
+        candles = self.get_candles(timeframe, limit=limit)
+        
+        # Append current forming candle if available (for 1m)
+        if timeframe == '1m' and self._latest_1m:
+            if not candles or candles[-1].timestamp != self._latest_1m.timestamp:
+                candles.append(self._latest_1m)
+                
+        if not candles:
+            return []
+            
+        try:
+            # Convert to DataFrame for calculation
+            df = pd.DataFrame({
+                'open': [c.open for c in candles],
+                'high': [c.high for c in candles],
+                'low': [c.low for c in candles],
+                'close': [c.close for c in candles],
+                'volume': [c.volume for c in candles]
+            })
+            
+            # Calculate indicators
+            # VWAP
+            vwap_series = self.vwap_calculator.calculate_vwap_series(candles)
+            
+            # Bollinger Bands - use series method for arrays
+            bb_series = self.bollinger_calculator.calculate_bands_series(candles)
+            
+            # Prepare result list
+            result = []
+            for i, candle in enumerate(candles):
+                # Handle VWAP - can be Series or scalar
+                if vwap_series is not None:
+                    try:
+                        vwap_val = float(vwap_series.iloc[i]) if hasattr(vwap_series, 'iloc') else float(vwap_series)
+                    except (IndexError, TypeError):
+                        vwap_val = 0.0
+                else:
+                    vwap_val = 0.0
+                
+                # Handle Bollinger Bands - now using series result
+                if bb_series:
+                    try:
+                        bb_upper = bb_series.upper_band[i] if i < len(bb_series.upper_band) else 0.0
+                        bb_lower = bb_series.lower_band[i] if i < len(bb_series.lower_band) else 0.0
+                        bb_middle = bb_series.middle_band[i] if i < len(bb_series.middle_band) else 0.0
+                    except (IndexError, TypeError):
+                        bb_upper = bb_lower = bb_middle = 0.0
+                else:
+                    bb_upper = bb_lower = bb_middle = 0.0
+                
+                item = {
+                    'time': int(candle.timestamp.timestamp()), # Seconds for Lightweight Charts
+                    'open': candle.open,
+                    'high': candle.high,
+                    'low': candle.low,
+                    'close': candle.close,
+                    'volume': candle.volume,
+                    'vwap': vwap_val,
+                    'bb_upper': bb_upper,
+                    'bb_lower': bb_lower,
+                    'bb_middle': bb_middle
+                }
+                result.append(item)
+                
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating historical indicators: {e}")
+            return []
     
     def subscribe_signals(self, callback: Callable[[TradingSignal], None]) -> None:
         """

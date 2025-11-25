@@ -137,6 +137,9 @@ class TALibCalculator:
             
             return result_df
             
+        except RecursionError:
+            logger.error("CRITICAL: Infinite recursion detected in indicator calc!")
+            raise RuntimeError("Infinite recursion in indicator calculation")
         except Exception as e:
             logger.error(f"Error calculating indicators: {e}")
             raise RuntimeError(f"Indicator calculation failed: {e}") from e

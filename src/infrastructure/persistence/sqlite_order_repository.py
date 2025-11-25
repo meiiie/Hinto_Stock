@@ -1,5 +1,6 @@
 import sqlite3
-from typing import List, Optional
+import json
+from typing import List, Optional, Tuple
 from datetime import datetime
 from contextlib import contextmanager
 from src.domain.entities.paper_position import PaperPosition
@@ -10,6 +11,64 @@ class SQLiteOrderRepository(IOrderRepository):
     
     def __init__(self, db_path: str = "data/trading_system.db"):
         self.db_path = db_path
+        self._init_tables()
+
+    def _init_tables(self) -> None:
+        """Initialize database tables if they don't exist"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Paper positions table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS paper_positions (
+                    id TEXT PRIMARY KEY,
+                    symbol TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    entry_price REAL NOT NULL,
+                    quantity REAL NOT NULL,
+                    leverage INTEGER DEFAULT 1,
+                    margin REAL NOT NULL,
+                    liquidation_price REAL,
+                    stop_loss REAL DEFAULT 0,
+                    take_profit REAL DEFAULT 0,
+                    open_time TEXT NOT NULL,
+                    close_time TEXT,
+                    realized_pnl REAL DEFAULT 0,
+                    exit_reason TEXT,
+                    highest_price REAL DEFAULT 0,
+                    lowest_price REAL DEFAULT 0,
+                    signal_metadata TEXT
+                )
+            ''')
+            
+            # Paper account table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS paper_account (
+                    id INTEGER PRIMARY KEY,
+                    balance REAL NOT NULL DEFAULT 10000.0
+                )
+            ''')
+            
+            # Settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Initialize account if not exists
+            cursor.execute('SELECT COUNT(*) FROM paper_account')
+            if cursor.fetchone()[0] == 0:
+                cursor.execute('INSERT INTO paper_account (id, balance) VALUES (1, 10000.0)')
+            
+            # Create indexes for performance
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_paper_positions_status ON paper_positions(status)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_paper_positions_entry_time ON paper_positions(open_time)')
+            
+            conn.commit()
 
     @contextmanager
     def _get_connection(self):
@@ -22,11 +81,11 @@ class SQLiteOrderRepository(IOrderRepository):
             conn.close()
 
     def save_order(self, position: PaperPosition) -> None:
-        """Save a new position"""
+        """Save a new position (or replace if exists)"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO paper_positions (
+                INSERT OR REPLACE INTO paper_positions (
                     id, symbol, side, status, entry_price, quantity, 
                     leverage, margin, liquidation_price,
                     stop_loss, take_profit, 
@@ -163,6 +222,7 @@ class SQLiteOrderRepository(IOrderRepository):
             close_time=datetime.fromisoformat(row['close_time']) if row['close_time'] else None,
             realized_pnl=row['realized_pnl'],
             exit_reason=row['exit_reason'],
+            highest_price=highest_price,
             lowest_price=lowest_price
         )
 
@@ -175,3 +235,62 @@ class SQLiteOrderRepository(IOrderRepository):
             # Reset account balance
             cursor.execute("UPDATE paper_account SET balance = 10000.0 WHERE id = 1")
             conn.commit()
+
+    def get_closed_orders_paginated(self, page: int, limit: int) -> Tuple[List[PaperPosition], int]:
+        """
+        Get closed orders with pagination.
+        
+        Args:
+            page: Page number (1-indexed)
+            limit: Number of items per page
+            
+        Returns:
+            Tuple of (list of positions, total count)
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get total count
+            cursor.execute("SELECT COUNT(*) FROM paper_positions WHERE status = 'CLOSED'")
+            total_count = cursor.fetchone()[0]
+            
+            # Get paginated results (sorted by entry_time descending)
+            offset = (page - 1) * limit
+            cursor.execute("""
+                SELECT * FROM paper_positions 
+                WHERE status = 'CLOSED' 
+                ORDER BY open_time DESC 
+                LIMIT ? OFFSET ?
+            """, (limit, offset))
+            
+            rows = cursor.fetchall()
+            positions = [self._row_to_position(row) for row in rows]
+            
+            return positions, total_count
+
+    # Settings methods
+    def get_setting(self, key: str) -> Optional[str]:
+        """Get a setting value by key"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+            row = cursor.fetchone()
+            return row['value'] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Set a setting value"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+            ''', (key, value, datetime.now().isoformat()))
+            conn.commit()
+
+    def get_all_settings(self) -> dict:
+        """Get all settings as a dictionary"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT key, value FROM settings')
+            rows = cursor.fetchall()
+            return {row['key']: row['value'] for row in rows}

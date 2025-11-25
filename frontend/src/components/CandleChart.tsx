@@ -1,0 +1,806 @@
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { 
+    createChart, 
+    ColorType, 
+    IChartApi, 
+    ISeriesApi, 
+    Time, 
+    CandlestickSeries, 
+    LineSeries,
+    HistogramSeries,
+    CrosshairMode,
+    LineStyle
+} from 'lightweight-charts';
+import { useMarketData } from '../hooks/useMarketData';
+
+// Binance Color Scheme
+const BINANCE_COLORS = {
+    background: '#0B0E11',
+    cardBg: '#181A20',
+    grid: '#333B47',
+    textPrimary: '#EAECEF',
+    textSecondary: '#929AA5',
+    textTertiary: '#707A8A',
+    buy: '#2EBD85',
+    sell: '#F6465D',
+    buyBg: 'rgba(46, 189, 133, 0.1)',
+    sellBg: 'rgba(246, 70, 93, 0.1)',
+    vwap: '#F0B90B',
+    bollinger: '#2962FF',
+    line: '#2B2F36',
+};
+
+interface ChartData {
+    time: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume?: number;
+    vwap?: number;
+    bb_upper?: number;
+    bb_lower?: number;
+    bb_middle?: number;
+}
+
+interface Signal {
+    type: 'BUY' | 'SELL';
+    price: number;
+    entry_price: number;
+    stop_loss: number;
+    take_profit: number;
+    confidence: number;
+    risk_reward_ratio: number;
+    timestamp: string;
+    reason?: string;
+}
+
+interface SignalMarker {
+    time: Time;
+    position: 'aboveBar' | 'belowBar';
+    color: string;
+    shape: 'arrowUp' | 'arrowDown';
+    text: string;
+    size: number;
+    id: string;
+    signal: Signal;
+}
+
+type Timeframe = '1m' | '15m' | '1h';
+
+// Vietnam Timezone offset (UTC+7)
+const VN_TIMEZONE_OFFSET = 7 * 60 * 60; // 7 hours in seconds
+
+/**
+ * Convert UTC timestamp to Vietnam time for display
+ */
+const toVietnamTime = (utcTimestamp: number): Time => {
+    return (utcTimestamp + VN_TIMEZONE_OFFSET) as Time;
+};
+
+
+
+/**
+ * Format price with Vietnamese locale
+ */
+const formatPrice = (price: number): string => {
+    return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }).format(price);
+};
+
+/**
+ * CandleChart Component - Binance Professional Style
+ * 
+ * **Feature: desktop-trading-dashboard**
+ * **Validates: Requirements 2.1, 2.3, 2.4, 3.1, 3.2, 3.3, 3.4**
+ */
+const CandleChart: React.FC = () => {
+    const chartContainerRef = useRef<HTMLDivElement>(null);
+    const chartRef = useRef<IChartApi | null>(null);
+
+    // Series Refs
+    const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+    const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+    const vwapSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const bbUpperSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const bbLowerSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+    
+    // Signal Level Lines
+    const entryLineRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const slLineRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const tpLineRef = useRef<ISeriesApi<"Line"> | null>(null);
+
+    const { data: realtimeData, signal: realtimeSignal } = useMarketData('btcusdt');
+    const [timeframe, setTimeframe] = useState<Timeframe>('15m');
+    const [isLoading, setIsLoading] = useState(true);
+    const [signals, setSignals] = useState<SignalMarker[]>([]);
+    const [activeSignal, setActiveSignal] = useState<Signal | null>(null);
+    const [currentPrice, setCurrentPrice] = useState<number>(0);
+    const [priceChange, setPriceChange] = useState<number>(0);
+    const [tooltipData, setTooltipData] = useState<{
+        visible: boolean;
+        x: number;
+        y: number;
+        signal: Signal | null;
+    }>({ visible: false, x: 0, y: 0, signal: null });
+
+    // Store current forming candle for aggregation
+    const currentCandleRef = useRef<{
+        time: number;
+        open: number;
+        high: number;
+        low: number;
+        close: number;
+        volume: number;
+    } | null>(null);
+
+    // Add signal marker to chart
+    const addSignalMarker = useCallback((signal: Signal, time: number) => {
+        const marker: SignalMarker = {
+            time: toVietnamTime(time),
+            position: signal.type === 'BUY' ? 'belowBar' : 'aboveBar',
+            color: signal.type === 'BUY' ? BINANCE_COLORS.buy : BINANCE_COLORS.sell,
+            shape: signal.type === 'BUY' ? 'arrowUp' : 'arrowDown',
+            text: signal.type === 'BUY' ? '▲ BUY' : '▼ SELL',
+            size: 2,
+            id: `${signal.type}-${time}`,
+            signal: signal
+        };
+
+        setSignals(prev => {
+            if (prev.some(s => s.id === marker.id)) return prev;
+            return [...prev, marker];
+        });
+        setActiveSignal(signal);
+    }, []);
+
+    // Update entry/SL/TP lines when active signal changes
+    useEffect(() => {
+        if (!activeSignal || !chartRef.current) return;
+
+        const now = toVietnamTime(Math.floor(Date.now() / 1000));
+        const future = toVietnamTime(Math.floor(Date.now() / 1000) + 86400);
+
+        if (entryLineRef.current) {
+            entryLineRef.current.setData([
+                { time: now, value: activeSignal.entry_price },
+                { time: future, value: activeSignal.entry_price }
+            ]);
+        }
+
+        if (slLineRef.current && activeSignal.stop_loss > 0) {
+            slLineRef.current.setData([
+                { time: now, value: activeSignal.stop_loss },
+                { time: future, value: activeSignal.stop_loss }
+            ]);
+        }
+
+        if (tpLineRef.current && activeSignal.take_profit > 0) {
+            tpLineRef.current.setData([
+                { time: now, value: activeSignal.take_profit },
+                { time: future, value: activeSignal.take_profit }
+            ]);
+        }
+    }, [activeSignal]);
+
+    // Initialize Chart with Binance styling
+    useEffect(() => {
+        if (!chartContainerRef.current) return;
+
+        const chart = createChart(chartContainerRef.current, {
+            layout: {
+                background: { type: ColorType.Solid, color: BINANCE_COLORS.background },
+                textColor: BINANCE_COLORS.textSecondary,
+                fontFamily: "'Roboto', 'Helvetica Neue', sans-serif",
+                fontSize: 12,
+            },
+            grid: {
+                vertLines: { color: BINANCE_COLORS.grid, style: LineStyle.Solid },
+                horzLines: { color: BINANCE_COLORS.grid, style: LineStyle.Solid },
+            },
+            width: chartContainerRef.current.clientWidth,
+            height: chartContainerRef.current.clientHeight || 400,
+            timeScale: {
+                timeVisible: true,
+                secondsVisible: false,
+                borderColor: BINANCE_COLORS.line,
+                tickMarkFormatter: (time: Time) => {
+                    const date = new Date((time as number) * 1000);
+                    return date.toLocaleString('vi-VN', {
+                        timeZone: 'UTC',
+                        day: '2-digit',
+                        month: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                },
+            },
+            rightPriceScale: {
+                borderColor: BINANCE_COLORS.line,
+                scaleMargins: { top: 0.1, bottom: 0.2 },
+            },
+            crosshair: {
+                mode: CrosshairMode.Normal,
+                vertLine: {
+                    color: BINANCE_COLORS.textTertiary,
+                    width: 1,
+                    style: LineStyle.Dashed,
+                    labelBackgroundColor: BINANCE_COLORS.cardBg,
+                },
+                horzLine: {
+                    color: BINANCE_COLORS.textTertiary,
+                    width: 1,
+                    style: LineStyle.Dashed,
+                    labelBackgroundColor: BINANCE_COLORS.cardBg,
+                },
+            },
+            handleScroll: { mouseWheel: true, pressedMouseMove: true },
+            handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
+        });
+
+        // 1. Candlestick Series - Binance colors
+        const candleSeries = chart.addSeries(CandlestickSeries, {
+            upColor: BINANCE_COLORS.buy,
+            downColor: BINANCE_COLORS.sell,
+            borderUpColor: BINANCE_COLORS.buy,
+            borderDownColor: BINANCE_COLORS.sell,
+            wickUpColor: BINANCE_COLORS.buy,
+            wickDownColor: BINANCE_COLORS.sell,
+            priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+        });
+        candleSeriesRef.current = candleSeries;
+
+        // 2. Volume Series - at bottom
+        const volumeSeries = chart.addSeries(HistogramSeries, {
+            color: BINANCE_COLORS.buy,
+            priceFormat: { type: 'volume' },
+            priceScaleId: 'volume',
+        });
+        volumeSeries.priceScale().applyOptions({
+            scaleMargins: { top: 0.85, bottom: 0 },
+        });
+        volumeSeriesRef.current = volumeSeries;
+
+        // 3. VWAP Series - Binance yellow
+        const vwapSeries = chart.addSeries(LineSeries, {
+            color: BINANCE_COLORS.vwap,
+            lineWidth: 2,
+            priceLineVisible: false,
+            lastValueVisible: true,
+            title: 'VWAP',
+        });
+        vwapSeriesRef.current = vwapSeries;
+
+        // 4. Bollinger Bands - Blue
+        const bbUpperSeries = chart.addSeries(LineSeries, {
+            color: BINANCE_COLORS.bollinger,
+            lineWidth: 1,
+            lineStyle: LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            title: 'BB Upper',
+        });
+        bbUpperSeriesRef.current = bbUpperSeries;
+
+        const bbLowerSeries = chart.addSeries(LineSeries, {
+            color: BINANCE_COLORS.bollinger,
+            lineWidth: 1,
+            lineStyle: LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            title: 'BB Lower',
+        });
+        bbLowerSeriesRef.current = bbLowerSeries;
+
+        // 5. Signal Level Lines
+        const entryLine = chart.addSeries(LineSeries, {
+            color: '#FFFFFF',
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            priceLineVisible: false,
+            lastValueVisible: true,
+            title: 'Entry',
+        });
+        entryLineRef.current = entryLine;
+
+        const slLine = chart.addSeries(LineSeries, {
+            color: BINANCE_COLORS.sell,
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            priceLineVisible: false,
+            lastValueVisible: true,
+            title: 'SL',
+        });
+        slLineRef.current = slLine;
+
+        const tpLine = chart.addSeries(LineSeries, {
+            color: BINANCE_COLORS.buy,
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            priceLineVisible: false,
+            lastValueVisible: true,
+            title: 'TP',
+        });
+        tpLineRef.current = tpLine;
+
+        chartRef.current = chart;
+
+        // Handle crosshair move for tooltip
+        chart.subscribeCrosshairMove((param) => {
+            if (!param.point || !param.time) {
+                setTooltipData(prev => ({ ...prev, visible: false }));
+                return;
+            }
+            const hoveredSignal = signals.find(s => s.time === param.time);
+            if (hoveredSignal) {
+                setTooltipData({
+                    visible: true,
+                    x: param.point.x,
+                    y: param.point.y,
+                    signal: hoveredSignal.signal
+                });
+            } else {
+                setTooltipData(prev => ({ ...prev, visible: false }));
+            }
+        });
+
+        const handleResize = () => {
+            if (chartContainerRef.current && chartRef.current) {
+                chartRef.current.applyOptions({ 
+                    width: chartContainerRef.current.clientWidth,
+                    height: chartContainerRef.current.clientHeight || 400
+                });
+            }
+        };
+
+        window.addEventListener('resize', handleResize);
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            chart.remove();
+        };
+    }, [signals]);
+
+    // Load History when Timeframe Changes
+    useEffect(() => {
+        const fetchHistory = async () => {
+            setIsLoading(true);
+            currentCandleRef.current = null;
+            setSignals([]);
+
+            try {
+                const response = await fetch(`http://127.0.0.1:8000/ws/history/btcusdt?timeframe=${timeframe}`);
+                if (!response.ok) throw new Error('Failed to fetch history');
+
+                const historyData: ChartData[] = await response.json();
+
+                if (historyData && historyData.length > 0) {
+                    // TRIM DATA: Skip first 50 candles to eliminate indicator warm-up lag
+                    // This ensures indicators (VWAP, BB) appear from the first visible candle
+                    const WARMUP_PERIOD = 50;
+                    const trimmedData = historyData.length > WARMUP_PERIOD 
+                        ? historyData.slice(WARMUP_PERIOD) 
+                        : historyData;
+
+                    // Convert to Vietnam time
+                    const candles = trimmedData.map(d => ({
+                        time: toVietnamTime(d.time),
+                        open: d.open,
+                        high: d.high,
+                        low: d.low,
+                        close: d.close,
+                    }));
+
+                    // Volume data with reduced opacity (0.3) to not compete with price candles
+                    const volumes = trimmedData.map(d => ({
+                        time: toVietnamTime(d.time),
+                        value: d.volume || 0,
+                        color: d.close >= d.open 
+                            ? 'rgba(46, 189, 133, 0.3)' 
+                            : 'rgba(246, 70, 93, 0.3)',
+                    }));
+
+                    const vwap = trimmedData
+                        .filter(d => d.vwap && d.vwap > 0)
+                        .map(d => ({ time: toVietnamTime(d.time), value: d.vwap! }));
+
+                    const bbUpper = trimmedData
+                        .filter(d => d.bb_upper && d.bb_upper > 0)
+                        .map(d => ({ time: toVietnamTime(d.time), value: d.bb_upper! }));
+
+                    const bbLower = trimmedData
+                        .filter(d => d.bb_lower && d.bb_lower > 0)
+                        .map(d => ({ time: toVietnamTime(d.time), value: d.bb_lower! }));
+
+                    if (candleSeriesRef.current) candleSeriesRef.current.setData(candles);
+                    if (volumeSeriesRef.current) volumeSeriesRef.current.setData(volumes);
+                    if (vwapSeriesRef.current) vwapSeriesRef.current.setData(vwap);
+                    if (bbUpperSeriesRef.current) bbUpperSeriesRef.current.setData(bbUpper);
+                    if (bbLowerSeriesRef.current) bbLowerSeriesRef.current.setData(bbLower);
+
+                    // Clear level lines
+                    if (entryLineRef.current) entryLineRef.current.setData([]);
+                    if (slLineRef.current) slLineRef.current.setData([]);
+                    if (tpLineRef.current) tpLineRef.current.setData([]);
+
+                    if (chartRef.current) chartRef.current.timeScale().fitContent();
+
+                    const lastCandle = trimmedData[trimmedData.length - 1];
+                    const prevCandle = trimmedData[trimmedData.length - 2];
+                    
+                    setCurrentPrice(lastCandle.close);
+                    if (prevCandle) {
+                        setPriceChange(lastCandle.close - prevCandle.close);
+                    }
+
+                    currentCandleRef.current = {
+                        time: lastCandle.time,
+                        open: lastCandle.open,
+                        high: lastCandle.high,
+                        low: lastCandle.low,
+                        close: lastCandle.close,
+                        volume: lastCandle.volume || 0
+                    };
+                }
+            } catch (err) {
+                console.error("Error loading chart history:", err);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchHistory();
+    }, [timeframe]);
+
+    // Handle new signals from WebSocket
+    useEffect(() => {
+        if (!realtimeSignal) return;
+        const signalTime = realtimeSignal.timestamp 
+            ? Math.floor(new Date(realtimeSignal.timestamp).getTime() / 1000)
+            : Math.floor(Date.now() / 1000);
+        addSignalMarker(realtimeSignal, signalTime);
+    }, [realtimeSignal, addSignalMarker]);
+
+    // Aggregate Real-time Data with Vietnam timezone
+    useEffect(() => {
+        if (!realtimeData || isLoading) return;
+
+        try {
+            const time = (new Date(realtimeData.timestamp).getTime() / 1000);
+            let intervalSeconds = 60;
+            if (timeframe === '15m') intervalSeconds = 900;
+            if (timeframe === '1h') intervalSeconds = 3600;
+
+            const candleStartTime = Math.floor(time / intervalSeconds) * intervalSeconds;
+
+            if (currentCandleRef.current && candleStartTime < currentCandleRef.current.time) {
+                return; // Skip old data
+            }
+
+            // Update current price
+            setCurrentPrice(realtimeData.close);
+
+            if (currentCandleRef.current && currentCandleRef.current.time === candleStartTime) {
+                const updatedCandle = {
+                    ...currentCandleRef.current,
+                    high: Math.max(currentCandleRef.current.high, realtimeData.high),
+                    low: Math.min(currentCandleRef.current.low, realtimeData.low),
+                    close: realtimeData.close,
+                    volume: (currentCandleRef.current.volume || 0) + (realtimeData.volume || 0),
+                };
+                currentCandleRef.current = updatedCandle;
+
+                if (candleSeriesRef.current) {
+                    candleSeriesRef.current.update({
+                        time: toVietnamTime(candleStartTime),
+                        open: updatedCandle.open,
+                        high: updatedCandle.high,
+                        low: updatedCandle.low,
+                        close: updatedCandle.close,
+                    });
+                }
+
+                if (volumeSeriesRef.current) {
+                    volumeSeriesRef.current.update({
+                        time: toVietnamTime(candleStartTime),
+                        value: updatedCandle.volume,
+                        color: updatedCandle.close >= updatedCandle.open 
+                            ? 'rgba(46, 189, 133, 0.5)' 
+                            : 'rgba(246, 70, 93, 0.5)',
+                    });
+                }
+            } else {
+                const newCandle = {
+                    time: candleStartTime,
+                    open: realtimeData.open,
+                    high: realtimeData.high,
+                    low: realtimeData.low,
+                    close: realtimeData.close,
+                    volume: realtimeData.volume || 0,
+                };
+                currentCandleRef.current = newCandle;
+
+                if (candleSeriesRef.current) {
+                    candleSeriesRef.current.update({
+                        time: toVietnamTime(candleStartTime),
+                        open: newCandle.open,
+                        high: newCandle.high,
+                        low: newCandle.low,
+                        close: newCandle.close,
+                    });
+                }
+
+                if (volumeSeriesRef.current) {
+                    volumeSeriesRef.current.update({
+                        time: toVietnamTime(candleStartTime),
+                        value: newCandle.volume,
+                        color: newCandle.close >= newCandle.open 
+                            ? 'rgba(46, 189, 133, 0.5)' 
+                            : 'rgba(246, 70, 93, 0.5)',
+                    });
+                }
+            }
+
+            // Update indicators for 1m timeframe
+            if (timeframe === '1m') {
+                if (vwapSeriesRef.current && realtimeData.vwap) {
+                    vwapSeriesRef.current.update({ 
+                        time: toVietnamTime(candleStartTime), 
+                        value: realtimeData.vwap 
+                    });
+                }
+                if (bbUpperSeriesRef.current && realtimeData.bollinger) {
+                    bbUpperSeriesRef.current.update({ 
+                        time: toVietnamTime(candleStartTime), 
+                        value: realtimeData.bollinger.upper_band 
+                    });
+                }
+                if (bbLowerSeriesRef.current && realtimeData.bollinger) {
+                    bbLowerSeriesRef.current.update({ 
+                        time: toVietnamTime(candleStartTime), 
+                        value: realtimeData.bollinger.lower_band 
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Error updating candle:', err);
+        }
+    }, [realtimeData, timeframe, isLoading]);
+
+    // Get current Vietnam time
+    const getCurrentVietnamTime = () => {
+        const now = new Date();
+        return now.toLocaleString('vi-VN', {
+            timeZone: 'Asia/Ho_Chi_Minh',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+    };
+
+    const [currentTime, setCurrentTime] = useState(getCurrentVietnamTime());
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setCurrentTime(getCurrentVietnamTime());
+        }, 1000);
+        return () => clearInterval(timer);
+    }, []);
+
+    return (
+        <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', borderRadius: '8px', overflow: 'hidden', backgroundColor: BINANCE_COLORS.cardBg }}>
+            {/* Header Row 1 - Symbol & Price */}
+            <div style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+                padding: '12px',
+                borderBottom: `1px solid ${BINANCE_COLORS.line}`,
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ fontSize: '18px', fontWeight: 700, color: BINANCE_COLORS.textPrimary }}>
+                        BTC/USDT
+                    </span>
+                    <span style={{ 
+                        fontSize: '12px',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        backgroundColor: BINANCE_COLORS.buyBg, 
+                        color: BINANCE_COLORS.buy 
+                    }}>
+                        Perpetual
+                    </span>
+                    <span style={{ 
+                        fontSize: '20px', 
+                        fontFamily: "'JetBrains Mono', monospace", 
+                        fontWeight: 700, 
+                        color: BINANCE_COLORS.textPrimary 
+                    }}>
+                        {currentPrice > 0 ? `$${formatPrice(currentPrice)}` : '---'}
+                    </span>
+                    <span style={{ 
+                        fontSize: '14px', 
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontWeight: 500,
+                        color: priceChange >= 0 ? BINANCE_COLORS.buy : BINANCE_COLORS.sell 
+                    }}>
+                        {currentPrice > 0 
+                            ? `${priceChange >= 0 ? '+' : ''}${formatPrice(priceChange)} (${((priceChange / currentPrice) * 100).toFixed(2)}%)`
+                            : '---'
+                        }
+                    </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    {/* Timeframe Buttons */}
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                        {(['1m', '15m', '1h'] as Timeframe[]).map((tf) => (
+                            <button
+                                key={tf}
+                                onClick={() => setTimeframe(tf)}
+                                style={{
+                                    padding: '4px 12px',
+                                    borderRadius: '4px',
+                                    fontSize: '12px',
+                                    fontWeight: 500,
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s',
+                                    backgroundColor: timeframe === tf ? BINANCE_COLORS.vwap : 'transparent',
+                                    color: timeframe === tf ? '#000' : BINANCE_COLORS.textSecondary,
+                                }}
+                            >
+                                {tf.toUpperCase()}
+                            </button>
+                        ))}
+                    </div>
+                    {/* Vietnam Time */}
+                    <span style={{ 
+                        fontSize: '12px', 
+                        fontFamily: "'JetBrains Mono', monospace", 
+                        color: BINANCE_COLORS.textTertiary 
+                    }}>
+                        🇻🇳 {currentTime}
+                    </span>
+                </div>
+            </div>
+
+            {/* Header Row 2 - Indicators Legend */}
+            <div style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: '16px',
+                padding: '6px 12px',
+                fontSize: '12px',
+                borderBottom: `1px solid ${BINANCE_COLORS.line}`,
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <div style={{ width: '12px', height: '2px', backgroundColor: BINANCE_COLORS.vwap }}></div>
+                    <span style={{ color: BINANCE_COLORS.vwap }}>VWAP</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <div style={{ width: '12px', height: '2px', backgroundColor: BINANCE_COLORS.bollinger }}></div>
+                    <span style={{ color: BINANCE_COLORS.bollinger }}>BB(20,2)</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <div style={{ width: '12px', height: '12px', borderRadius: '2px', backgroundColor: BINANCE_COLORS.buy }}></div>
+                    <span style={{ color: BINANCE_COLORS.buy }}>Tăng</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <div style={{ width: '12px', height: '12px', borderRadius: '2px', backgroundColor: BINANCE_COLORS.sell }}></div>
+                    <span style={{ color: BINANCE_COLORS.sell }}>Giảm</span>
+                </div>
+                {activeSignal && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
+                        <span style={{ color: activeSignal.type === 'BUY' ? BINANCE_COLORS.buy : BINANCE_COLORS.sell }}>
+                            ● {activeSignal.type} Signal Active
+                        </span>
+                    </div>
+                )}
+            </div>
+
+            {/* Chart Container */}
+            <div style={{ flex: 1, position: 'relative', minHeight: 0, backgroundColor: BINANCE_COLORS.background }}>
+                <div ref={chartContainerRef} style={{ width: '100%', height: '100%' }} />
+
+                {/* Loading Spinner */}
+                {isLoading && (
+                    <div style={{
+                        position: 'absolute',
+                        inset: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 20,
+                        backgroundColor: 'rgba(11, 14, 17, 0.9)',
+                    }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                            <div style={{
+                                width: '40px',
+                                height: '40px',
+                                border: `3px solid transparent`,
+                                borderTopColor: BINANCE_COLORS.vwap,
+                                borderRadius: '50%',
+                                animation: 'spin 1s linear infinite',
+                            }}></div>
+                            <span style={{ fontSize: '14px', color: BINANCE_COLORS.vwap }}>
+                                Đang tải dữ liệu...
+                            </span>
+                        </div>
+                    </div>
+                )}
+
+                {/* Signal Tooltip */}
+                {tooltipData.visible && tooltipData.signal && (
+                    <div style={{
+                        position: 'absolute',
+                        zIndex: 30,
+                        borderRadius: '8px',
+                        padding: '12px',
+                        boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+                        pointerEvents: 'none',
+                        backgroundColor: BINANCE_COLORS.cardBg,
+                        border: `1px solid ${BINANCE_COLORS.line}`,
+                        left: Math.min(tooltipData.x + 10, (chartContainerRef.current?.clientWidth || 400) - 200),
+                        top: Math.max(tooltipData.y - 100, 10)
+                    }}>
+                        <div style={{ 
+                            fontSize: '14px', 
+                            fontWeight: 700, 
+                            marginBottom: '8px',
+                            color: tooltipData.signal.type === 'BUY' ? BINANCE_COLORS.buy : BINANCE_COLORS.sell 
+                        }}>
+                            {tooltipData.signal.type === 'BUY' ? '▲' : '▼'} {tooltipData.signal.type} SIGNAL
+                        </div>
+                        <div style={{ fontSize: '12px', color: BINANCE_COLORS.textSecondary }}>
+                            <div style={{ marginBottom: '4px' }}>Entry: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.textPrimary }}>${tooltipData.signal.entry_price.toFixed(2)}</span></div>
+                            <div style={{ marginBottom: '4px' }}>Stop Loss: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.sell }}>${tooltipData.signal.stop_loss.toFixed(2)}</span></div>
+                            <div style={{ marginBottom: '4px' }}>Take Profit: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.buy }}>${tooltipData.signal.take_profit.toFixed(2)}</span></div>
+                            <div style={{ marginBottom: '4px' }}>Confidence: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.vwap }}>{(tooltipData.signal.confidence * 100).toFixed(0)}%</span></div>
+                            <div>R:R Ratio: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.bollinger }}>{tooltipData.signal.risk_reward_ratio.toFixed(2)}</span></div>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Active Signal Info Bar */}
+            {activeSignal && (
+                <div style={{ 
+                    padding: '12px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    fontSize: '12px',
+                    backgroundColor: BINANCE_COLORS.cardBg, 
+                    borderTop: `1px solid ${BINANCE_COLORS.line}` 
+                }}>
+                    <div style={{ display: 'flex', gap: '24px' }}>
+                        <span style={{ color: BINANCE_COLORS.textTertiary }}>
+                            Entry: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.textPrimary }}>${activeSignal.entry_price.toFixed(2)}</span>
+                        </span>
+                        <span style={{ color: BINANCE_COLORS.textTertiary }}>
+                            SL: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.sell }}>${activeSignal.stop_loss.toFixed(2)}</span>
+                        </span>
+                        <span style={{ color: BINANCE_COLORS.textTertiary }}>
+                            TP: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.buy }}>${activeSignal.take_profit.toFixed(2)}</span>
+                        </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '24px' }}>
+                        <span style={{ color: BINANCE_COLORS.textTertiary }}>
+                            Confidence: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.vwap }}>{(activeSignal.confidence * 100).toFixed(0)}%</span>
+                        </span>
+                        <span style={{ color: BINANCE_COLORS.textTertiary }}>
+                            R:R: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.bollinger }}>{activeSignal.risk_reward_ratio.toFixed(2)}</span>
+                        </span>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default CandleChart;

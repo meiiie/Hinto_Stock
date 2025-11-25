@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\api\websocket_manager.py
+# hypothesis_version: 6.148.2
+
+['active_connections', 'client_id', 'connected', 'connected_at', 'connecting', 'disconnected', 'disconnecting', 'last_message_at', 'message_count', 'state', 'subscribed_symbols', 'symbol', 'total_connections', 'total_disconnections', 'total_messages_sent']

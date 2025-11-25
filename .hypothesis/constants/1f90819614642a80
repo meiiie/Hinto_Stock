@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\infrastructure\di_container.py
+# hypothesis_version: 6.148.2
+
+['BINANCE_API_KEY', 'BINANCE_API_SECRET', 'Closed BinanceClient', 'DATABASE_PATH', 'binance_client', 'crypto_data.db', 'indicator_calculator']

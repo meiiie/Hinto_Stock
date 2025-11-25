@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\application\signals\signal_generator.py
+# hypothesis_version: 6.148.2
+
+[0.0, 0.01, 0.015, 0.2, 0.8, 1.0, 2.0, 2.5, 4.0, 5.0, 100.0, 10000.0, 'BUY', 'SELL', 'above', 'adx_trending', 'adx_value', 'atr', 'atr_period', 'bb_bandwidth', 'bb_lower', 'bb_middle', 'bb_percent_b', 'bb_upper', 'below', 'close', 'ema_25', 'ema_7', 'high', 'low', 'none', 'open', 'price', 'price_vs_vwap', 'risk_reward_ratio', 'rsi', 'rsi_6', 'stoch_d', 'stoch_k', 'stoch_k_cross_down', 'stoch_k_cross_up', 'stoch_overbought', 'stoch_oversold', 'stoch_zone', 'timestamp', 'tp1', 'tp2', 'tp3', 'volume', 'volume_spike_ratio', 'vwap', 'vwap_distance_pct']

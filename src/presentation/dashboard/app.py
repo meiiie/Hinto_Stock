@@ -17,6 +17,7 @@ from src.utils.logging_config import configure_logging
 from src.presentation.dashboard.utils import initialize_session_state
 from src.infrastructure.persistence.sqlite_order_repository import SQLiteOrderRepository
 from src.application.services.paper_trading_service import PaperTradingService
+from src.application.services.realtime_service_threaded import ThreadedRealtimeService
 
 
 # Page configuration
@@ -58,25 +59,39 @@ def get_dashboard_service():
     return container.get_dashboard_service()
 
 
+@st.cache_resource(hash_funcs={ThreadedRealtimeService: lambda _: None}, show_spinner=False)
+def get_trading_service():
+    """
+    Get Global Singleton instance of the Trading Service.
+    Uses st.cache_resource to survive browser refreshes.
+    """
+    try:
+        # Initialize Paper Trading dependencies
+        order_repo = SQLiteOrderRepository()
+        paper_service = PaperTradingService(order_repo)
+        
+        # Initialize Service
+        service = ThreadedRealtimeService(paper_service=paper_service)
+        return service
+    except Exception as e:
+        st.error(f"Failed to initialize service: {e}")
+        return None
+
 def main():
     """Main application entry point"""
     
     # Initialize session state
     initialize_session_state()
     
-    # Initialize Real-time Service if not exists
-    if st.session_state.service is None:
-        try:
-            # Initialize Paper Trading dependencies
-            order_repo = SQLiteOrderRepository()
-            paper_service = PaperTradingService(order_repo)
-            
-            from src.application.services.realtime_service_threaded import ThreadedRealtimeService
-            st.session_state.service = ThreadedRealtimeService(paper_service=paper_service)
-            st.sidebar.success("✅ Service initialized")
-        except Exception as e:
-            st.sidebar.error(f"❌ Service initialization failed: {e}")
-            st.session_state.service = None
+    # Get Global Singleton Service
+    service = get_trading_service()
+    
+    if service:
+        st.session_state.service = service  # Keep for compatibility with pages
+        st.sidebar.success("✅ Service Running (Singleton)")
+    else:
+        st.sidebar.error("❌ Service Failed to Start")
+        st.session_state.service = None
     
     # Sidebar navigation
     st.sidebar.title("📈 Real-time Trading Dashboard")

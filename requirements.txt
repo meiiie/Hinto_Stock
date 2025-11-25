@@ -26,3 +26,8 @@ plotly>=5.17.0
 # Testing
 pytest>=7.4.3
 pytest-cov>=4.1.0
+hypothesis>=6.100.0  # Property-based testing
+
+# Backend (FastAPI)
+fastapi>=0.109.0
+uvicorn>=0.27.0

@@ -103,13 +103,14 @@ class BinanceWebSocketClient:
         # Logging
         self.logger = logging.getLogger(__name__)
     
-    async def connect(self, symbol: str = "btcusdt", interval: str = "1m") -> None:
+    async def connect(self, symbol: str = "btcusdt", interval: str = "1m", start_loop: bool = True) -> None:
         """
         Connect to Binance WebSocket stream.
         
         Args:
             symbol: Trading pair symbol (e.g., 'btcusdt')
             interval: Kline interval (e.g., '1m', '15m', '1h')
+            start_loop: Whether to start the receive loop task (default: True)
         
         Raises:
             Exception: If connection fails
@@ -119,7 +120,9 @@ class BinanceWebSocketClient:
             return
         
         self._should_run = True
-        self._state = ConnectionState.CONNECTING
+        # Only update state if not reconnecting (to preserve RECONNECTING status if applicable)
+        if self._state != ConnectionState.RECONNECTING:
+            self._state = ConnectionState.CONNECTING
         
         # Store connection parameters for reconnection
         self._symbol = symbol
@@ -147,8 +150,12 @@ class BinanceWebSocketClient:
             # Notify connection callbacks
             await self._notify_connection_status()
             
-            # Start receiving messages
-            self._receive_task = asyncio.create_task(self._receive_messages())
+            # Start receiving messages ONLY if requested and not already running
+            if start_loop:
+                if self._receive_task is None or self._receive_task.done():
+                    self._receive_task = asyncio.create_task(self._receive_messages())
+                else:
+                    self.logger.warning("Receive task already running")
             
         except Exception as e:
             self._state = ConnectionState.ERROR
@@ -245,7 +252,8 @@ class BinanceWebSocketClient:
         try:
             # Attempt to reconnect using stored parameters
             if self._symbol and self._interval:
-                await self.connect(self._symbol, self._interval)
+                # CRITICAL FIX: Do not start new loop, as we are already inside one
+                await self.connect(self._symbol, self._interval, start_loop=False)
                 
                 # Reset delay on successful connection
                 self._current_reconnect_delay = self.initial_reconnect_delay

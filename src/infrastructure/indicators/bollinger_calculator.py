@@ -175,3 +175,54 @@ class BollingerCalculator:
             True if bands are expanding
         """
         return current_bandwidth > previous_bandwidth
+    
+    def calculate_bands_series(
+        self, 
+        candles: List[Candle]
+    ) -> Optional['BollingerSeriesResult']:
+        """
+        Calculate Bollinger Bands for all candles (returns arrays).
+        
+        Args:
+            candles: List of Candle objects (chronological order)
+            
+        Returns:
+            BollingerSeriesResult with arrays for each band, or None if insufficient data
+        """
+        if not candles or len(candles) < self.period:
+            return None
+        
+        # Extract close prices
+        closes = [c.close for c in candles]
+        
+        # Use pandas for rolling calculations
+        series = pd.Series(closes)
+        
+        # Calculate SMA (middle band)
+        sma = series.rolling(window=self.period).mean()
+        
+        # Calculate standard deviation
+        std = series.rolling(window=self.period).std()
+        
+        # Calculate bands
+        upper = sma + (std * self.std_multiplier)
+        lower = sma - (std * self.std_multiplier)
+        
+        # Fill NaN with 0 for early candles
+        upper = upper.fillna(0).tolist()
+        lower = lower.fillna(0).tolist()
+        middle = sma.fillna(0).tolist()
+        
+        return BollingerSeriesResult(
+            upper_band=upper,
+            middle_band=middle,
+            lower_band=lower
+        )
+
+
+@dataclass
+class BollingerSeriesResult:
+    """Bollinger Bands series result (arrays for all candles)"""
+    upper_band: List[float]
+    middle_band: List[float]
+    lower_band: List[float]

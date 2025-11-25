@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\application\analysis\volume_analyzer.py
+# hypothesis_version: 6.148.2
+
+[0.0, 1.5, 2.0, 2.5, 'avg_recent', 'current', 'elevated', 'is_highest', 'max_recent', 'min_recent', 'normal', 'spike', 'strong_spike', 'vs_avg', 'vs_max']

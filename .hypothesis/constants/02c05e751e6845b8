@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\application\analysis\trend_filter.py
+# hypothesis_version: 6.148.2
+
+[0.0, 0.01, 0.05, 100, 'BUY', 'SELL', 'bearish', 'bearish_threshold', 'bullish', 'bullish_threshold', 'current_price', 'direction', 'ema_value', 'is_valid', 'neutral', 'spread_pct']

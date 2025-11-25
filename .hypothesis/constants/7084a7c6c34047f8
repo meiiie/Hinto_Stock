@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\domain\entities\market_data.py
+# hypothesis_version: 6.148.2
+
+[100.0, '12h', '15m', '1d', '1h', '1m', '1w', '2h', '30m', '3m', '4h', '5m', '6h', 'BUY', 'DOWNTREND', 'HOLD', 'Missing', 'NEUTRAL', 'SELL', 'UPTREND', 'close', 'ema_7', 'high', 'is_complete', 'low', 'open', 'price', 'quality_score', 'recommendation', 'rsi_6', 'rsi_signal', 'timeframe', 'timestamp', 'trend', 'volume', 'volume_ma_20', '✓', '✗']

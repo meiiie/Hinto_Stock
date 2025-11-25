@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\infrastructure\database\sqlite_repository.py
+# hypothesis_version: 6.148.2
+
+[0.0, 100, 1024, ':memory:', 'btc_15m', 'btc_1h', 'crypto_data.db', 'latest_record', 'oldest_record', 'record_count', 'size_mb']

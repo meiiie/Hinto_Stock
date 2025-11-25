@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\domain\entities\trading_signal.py
+# hypothesis_version: 6.148.2
+
+[0.65, 0.8, 'ConfidenceLevel', 'buy', 'high', 'low', 'medium', 'neutral', 'sell', '⚪', '🔴', '🟢']

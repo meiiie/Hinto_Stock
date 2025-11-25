@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\validator.py
+# hypothesis_version: 6.148.2
+
+[100, '15m', '=', 'DETAILED CHECKS:', 'No data to validate', 'PASS', 'actual_interval', 'btc_', 'btc_15m', 'checks', 'close', 'count', 'crypto_data.db', 'db_path', 'details', 'ema_7', 'empty', 'error', 'expected_interval', 'gap_percentage', 'gaps_found', 'has_issues', 'has_warnings', 'high', 'indicator_ranges', 'issues', 'low', 'max', 'min', 'missing_count', 'missing_percentage', 'missing_values', 'ok', 'open', 'quality_score', 'record_count', 'rsi_6', 'sample_gaps', 'status', 'table', 'table_name', 'time_continuity', 'timestamp', 'total_intervals', 'total_rows', 'valid', 'valid_range', 'volume', 'volume_ma_20', 'warnings', '⚠️  WARNINGS:', '✅ PASSED', '❌ FAILED', '🔴 ISSUES FOUND:']

@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\application\use_cases\fetch_market_data.py
+# hypothesis_version: 6.148.2
+
+[100, 1000, '15m', 'BTCUSDT', 'close', 'high', 'low', 'ms', 'open', 'open_time', 'volume']

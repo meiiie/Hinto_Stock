@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\domain\entities\enhanced_signal.py
+# hypothesis_version: 6.148.2
+
+[0.0, 0.01, 0.1, 0.3, 0.6, 1.0, 100, 14400, 'BUY', 'EnhancedSignal', 'SELL', 'TPLevels', 'confidence_score', 'direction', 'ema25', 'ema7', 'entry_price', 'indicator_alignment', 'max_hold_time', 'max_risk_pct', 'position_size', 'risk_reward_ratio', 'rsi6', 'sizes', 'stop_loss', 'symbol', 'take_profit', 'timeframe', 'timestamp', 'tp1', 'tp2', 'tp3', 'volume_spike', '🔴', '🟢']

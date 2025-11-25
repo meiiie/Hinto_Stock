@@ -1,12 +1,52 @@
 import uuid
-from datetime import datetime
-from typing import Optional, Dict, List
+import json
+from datetime import datetime, timedelta
+from typing import Optional, Dict, List, Tuple
+from dataclasses import dataclass
 from src.domain.entities.paper_position import PaperPosition
 from src.domain.entities.trading_signal import TradingSignal, SignalType
+from src.domain.entities.portfolio import Portfolio
+from src.domain.entities.performance_metrics import PerformanceMetrics
 from src.domain.repositories.i_order_repository import IOrderRepository
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PaginatedTrades:
+    """Paginated trade history result"""
+    trades: List[PaperPosition]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+    
+    def to_dict(self) -> dict:
+        return {
+            'trades': [
+                {
+                    'id': t.id,
+                    'symbol': t.symbol,
+                    'side': t.side,
+                    'status': t.status,
+                    'entry_price': t.entry_price,
+                    'quantity': t.quantity,
+                    'margin': t.margin,
+                    'stop_loss': t.stop_loss,
+                    'take_profit': t.take_profit,
+                    'open_time': t.open_time.isoformat() if t.open_time else None,
+                    'close_time': t.close_time.isoformat() if t.close_time else None,
+                    'realized_pnl': t.realized_pnl,
+                    'exit_reason': t.exit_reason
+                }
+                for t in self.trades
+            ],
+            'total': self.total,
+            'page': self.page,
+            'limit': self.limit,
+            'total_pages': self.total_pages
+        }
 
 class PaperTradingService:
     """
@@ -334,3 +374,150 @@ class PaperTradingService:
 
             if exit_price:
                 self.close_position(pos, exit_price, reason)
+
+    # ==================== NEW METHODS FOR DESKTOP APP ====================
+    
+    def get_portfolio(self, current_price: float = 0.0) -> Portfolio:
+        """
+        Get current portfolio state.
+        
+        Args:
+            current_price: Current market price for PnL calculation
+            
+        Returns:
+            Portfolio object with balance, equity, positions
+        """
+        balance = self.get_wallet_balance()
+        positions = self.get_positions()
+        unrealized_pnl = self.calculate_unrealized_pnl(current_price) if current_price > 0 else 0.0
+        
+        # Calculate realized PnL from closed trades
+        closed_trades = self.repo.get_closed_orders(limit=1000)
+        realized_pnl = sum(t.realized_pnl for t in closed_trades)
+        
+        equity = balance + unrealized_pnl
+        
+        return Portfolio(
+            balance=balance,
+            equity=equity,
+            unrealized_pnl=unrealized_pnl,
+            realized_pnl=realized_pnl,
+            open_positions=positions
+        )
+    
+    def get_trade_history(self, page: int = 1, limit: int = 20) -> PaginatedTrades:
+        """
+        Get paginated trade history.
+        
+        Args:
+            page: Page number (1-indexed)
+            limit: Items per page
+            
+        Returns:
+            PaginatedTrades with trades and pagination info
+        """
+        trades, total = self.repo.get_closed_orders_paginated(page, limit)
+        total_pages = (total + limit - 1) // limit  # Ceiling division
+        
+        return PaginatedTrades(
+            trades=trades,
+            total=total,
+            page=page,
+            limit=limit,
+            total_pages=total_pages
+        )
+    
+    def calculate_performance(self, days: int = 7) -> PerformanceMetrics:
+        """
+        Calculate performance metrics for the specified period.
+        
+        Args:
+            days: Number of days to analyze (default: 7)
+            
+        Returns:
+            PerformanceMetrics object
+        """
+        # Get all closed trades (we'll filter by date)
+        all_trades = self.repo.get_closed_orders(limit=10000)
+        
+        # Filter by date range
+        cutoff_date = datetime.now() - timedelta(days=days)
+        recent_trades = [
+            t for t in all_trades 
+            if t.close_time and t.close_time >= cutoff_date
+        ]
+        
+        return PerformanceMetrics.calculate_from_trades(recent_trades)
+    
+    # ==================== SETTINGS METHODS ====================
+    
+    def get_settings(self) -> dict:
+        """Get all trading settings"""
+        settings = self.repo.get_all_settings()
+        
+        # Return with defaults if not set
+        return {
+            'risk_percent': float(settings.get('risk_percent', '1.5')),
+            'rr_ratio': float(settings.get('rr_ratio', '1.5')),
+            'max_positions': int(settings.get('max_positions', '3')),
+            'leverage': int(settings.get('leverage', '1')),
+            'auto_execute': settings.get('auto_execute', 'false') == 'true'
+        }
+    
+    def update_settings(self, settings: dict) -> dict:
+        """
+        Update trading settings.
+        
+        Args:
+            settings: Dict with setting keys and values
+            
+        Returns:
+            Updated settings dict
+        """
+        allowed_keys = ['risk_percent', 'rr_ratio', 'max_positions', 'leverage', 'auto_execute']
+        
+        for key, value in settings.items():
+            if key in allowed_keys:
+                # Convert bool to string for storage
+                if isinstance(value, bool):
+                    value = 'true' if value else 'false'
+                self.repo.set_setting(key, str(value))
+                
+                # Apply to service immediately
+                if key == 'risk_percent':
+                    self.RISK_PER_TRADE = float(value) / 100
+                elif key == 'max_positions':
+                    self.MAX_POSITIONS = int(value)
+                elif key == 'leverage':
+                    self.LEVERAGE = int(value)
+        
+        logger.info(f"📝 Settings updated: {settings}")
+        return self.get_settings()
+    
+    def execute_trade(self, signal: TradingSignal, symbol: str = "BTCUSDT") -> Optional[str]:
+        """
+        Execute a trade from a signal (wrapper for on_signal_received).
+        
+        Args:
+            signal: Trading signal to execute
+            symbol: Trading symbol
+            
+        Returns:
+            Position ID if created, None otherwise
+        """
+        # Store current position count
+        before_count = len(self.get_positions()) + len(self.repo.get_pending_orders())
+        
+        # Execute via existing method
+        self.on_signal_received(signal, symbol)
+        
+        # Check if new position was created
+        after_count = len(self.get_positions()) + len(self.repo.get_pending_orders())
+        
+        if after_count > before_count:
+            # Return the latest pending order ID
+            pending = self.repo.get_pending_orders()
+            if pending:
+                return pending[-1].id
+        
+        return None
