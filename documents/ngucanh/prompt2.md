@@ -1,0 +1,1 @@
+Giờ cần dọn sạch kỹ hơn nữa. Đi từng chức năng ( hay từng component và từng trang) cải thiện từng component sao cho phù hợp và kiến trúc clean nhất có thể, chúng ta tuân theo clean kiến trúc và toàn vẹn kiến trúc.

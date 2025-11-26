@@ -119,13 +119,13 @@
 
 ## Phase 5: Tổ chức lại Test Files
 
-- [ ] 10. Di chuyển test files vào đúng thư mục
-  - [ ] 10.1 Di chuyển `test_backend.py` → `tests/integration/test_backend_flow.py`
+- [x] 10. Di chuyển test files vào đúng thư mục
+  - [x] 10.1 Di chuyển `test_backend.py` → `tests/integration/test_backend_flow.py`
     - Tạo folder `tests/integration/` nếu chưa tồn tại
     - _Requirements: 7.1_
-  - [ ] 10.2 Di chuyển `test_integration.py` → `tests/integration/test_full_system.py`
+  - [x] 10.2 Di chuyển `test_integration.py` → `tests/integration/test_full_system.py`
     - _Requirements: 7.2_
-  - [ ] 10.3 Cập nhật relative imports trong các test files đã di chuyển
+  - [x] 10.3 Cập nhật relative imports trong các test files đã di chuyển
     - _Requirements: 7.3_
   - [ ]* 10.4 Write property test: Moved test files work correctly
     - **Property 7: Moved Test Files Work Correctly**
@@ -133,15 +133,15 @@
 
 ## Phase 6: Final Verification
 
-- [ ] 11. Chạy verification tests
-  - [ ] 11.1 Chạy `pytest tests/` và verify tất cả tests pass
+- [x] 11. Chạy verification tests
+  - [x] 11.1 Chạy `pytest tests/` và verify tất cả tests pass
+    - 283 tests passed
     - _Requirements: 8.1, 8.3_
-
-
-
-  - [ ] 11.2 Khởi động backend với `uvicorn src.api.main:app`
-    - Verify không có ModuleNotFoundError
+  - [x] 11.2 Khởi động backend với `uvicorn src.api.main:app`
+    - Verify không có ModuleNotFoundError - PASSED
     - _Requirements: 8.2, 8.4_
 
-- [ ] 12. Final Checkpoint - Ensure all tests pass
-  - Ensure all tests pass, ask the user if questions arise.
+- [x] 12. Final Checkpoint - Ensure all tests pass
+  - All 283 tests passed
+  - Backend imports successful
+  - Final commit: be8638f
