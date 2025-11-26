@@ -1,4 +1,4 @@
-+"""
+"""
 RealtimeService - Application Layer
 
 Orchestrates real-time data flow and coordinates all components.

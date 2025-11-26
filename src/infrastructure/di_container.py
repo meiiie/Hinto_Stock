@@ -7,7 +7,7 @@ Container for managing dependencies and providing instances.
 from typing import Optional, Dict, Any
 import logging
 
-from .database.sqlite_repository import SQLiteMarketDataRepository
+from .persistence.sqlite_market_data_repository import SQLiteMarketDataRepository
 from .api.binance_client import BinanceClient
 from .indicators.talib_calculator import TALibCalculator
 from ..application.use_cases.fetch_market_data import FetchMarketDataUseCase
