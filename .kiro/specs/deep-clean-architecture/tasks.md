@@ -8,12 +8,15 @@
 
 
 
-  - [-] 1.1 Tạo utility functions để scan imports từ Python files
+  - [x] 1.1 Tạo utility functions để scan imports từ Python files
+
+
 
 
 
     - Sử dụng AST để parse imports
     - _Requirements: 7.3_
+
   - [ ] 1.2 Tạo utility functions để scan React/TypeScript imports
     - _Requirements: 5.2, 5.3_
   - [ ]* 1.3 Write property test: Domain layer independence
@@ -31,10 +34,12 @@
 - [ ] 3. Review và fix Domain entities
   - [ ] 3.1 Audit `src/domain/entities/` - remove any infrastructure imports
     - Check: candle.py, indicator.py, market_data.py, etc.
+
     - _Requirements: 1.1, 1.2_
   - [ ] 3.2 Audit `src/domain/repositories/` - ensure only abstract interfaces
     - Check: market_data_repository.py, i_order_repository.py
     - _Requirements: 1.3_
+
   - [ ] 3.3 Move any concrete implementations to Infrastructure
     - _Requirements: 3.1_
   - [ ]* 3.4 Write property test: Domain repository abstraction
