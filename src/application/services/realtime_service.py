@@ -1,4 +1,4 @@
-"""
++"""
 RealtimeService - Application Layer
 
 Orchestrates real-time data flow and coordinates all components.
@@ -272,6 +272,7 @@ class RealtimeService:
             candle: Candle entity
             metadata: Metadata (is_closed, symbol, etc.)
         """
+        self.logger.info(f"🕯️ _on_candle_received: {candle.close:.2f}")
         is_closed = metadata.get('is_closed', False)
         
         # Check if this is a NEW candle (different timestamp from current latest)
@@ -311,6 +312,7 @@ class RealtimeService:
             self._generate_signals()
         
         # Notify update callbacks
+        self.logger.info(f"📢 Calling _notify_update_callbacks with {len(self._update_callbacks)} callbacks")
         self._notify_update_callbacks()
     
     def _on_15m_complete(self, candle: Candle) -> None:
@@ -408,11 +410,13 @@ class RealtimeService:
     
     def _notify_update_callbacks(self) -> None:
         """Notify all update callbacks."""
+        if self._update_callbacks:
+            self.logger.debug(f"Notifying {len(self._update_callbacks)} update callbacks")
         for callback in self._update_callbacks:
             try:
                 callback()
             except Exception as e:
-                self.logger.error(f"Error in update callback: {e}")
+                self.logger.error(f"Error in update callback: {e}", exc_info=True)
     
     # Public API for dashboard
     
@@ -676,7 +680,7 @@ class RealtimeService:
             callback: Function to call when data updates
         """
         self._update_callbacks.append(callback)
-        self.logger.debug(f"Added update callback (total: {len(self._update_callbacks)})")
+        self.logger.info(f"✅ Added update callback (total: {len(self._update_callbacks)})")
     
     def get_status(self) -> Dict:
         """

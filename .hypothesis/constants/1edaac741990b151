@@ -1,0 +1,4 @@
+# file: C:\Users\Admin\AppData\Roaming\Python\Python313\site-packages\fastapi\_compat\v2.py
+# hypothesis_version: 6.148.2
+
+['$ref', '.', '/', 'BaseModel', 'Field required', '[^a-zA-Z0-9.\\-_]', '_', '__', 'description', 'ignore', 'input', 'json', 'loc', 'missing', 'python', 'serialization', 'title', 'type', 'validation']

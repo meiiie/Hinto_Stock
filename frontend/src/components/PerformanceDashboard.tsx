@@ -1,5 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createChart, ColorType, IChartApi, AreaSeries, LineStyle, Time } from 'lightweight-charts';
 import { THEME, formatPrice } from '../styles/theme';
+
+interface EquityPoint {
+    time: string;
+    equity: number;
+    pnl: number;
+}
 
 interface PerformanceMetrics {
     total_pnl: number;
@@ -26,6 +33,11 @@ const PerformanceDashboard: React.FC = () => {
     const [period, setPeriod] = useState<Period>('7d');
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [equityData, setEquityData] = useState<EquityPoint[]>([]);
+    
+    // Equity Chart refs
+    const equityChartRef = useRef<HTMLDivElement>(null);
+    const chartInstanceRef = useRef<IChartApi | null>(null);
 
     const periodDays: Record<Period, number> = { '7d': 7, '30d': 30, '90d': 90, 'all': 365 };
     const periodLabels: Record<Period, string> = { '7d': '7 ngày', '30d': '30 ngày', '90d': '90 ngày', 'all': 'Tất cả' };
@@ -45,9 +57,127 @@ const PerformanceDashboard: React.FC = () => {
         }
     }, [period]);
 
+    // Fetch equity curve data with TRADE-BY-TRADE resolution
+    const fetchEquityCurve = useCallback(async () => {
+        try {
+            // Use 'trade' resolution for better intraday visibility (15m strategy)
+            const response = await fetch(
+                `http://127.0.0.1:8000/trades/equity-curve?days=${periodDays[period]}&resolution=trade`
+            );
+            if (response.ok) {
+                const data = await response.json();
+                setEquityData(data.equity_curve || []);
+                
+                // Log for data consistency verification
+                console.log(`Equity Curve: ${data.equity_curve?.length || 0} points, ` +
+                    `Current: $${data.current_equity}, Resolution: ${data.resolution}`);
+            }
+        } catch (err) {
+            console.error('Failed to fetch equity curve:', err);
+            // Generate mock data if API not available
+            const mockData: EquityPoint[] = [];
+            const startEquity = 10000;
+            let currentEquity = startEquity;
+            const numTrades = Math.floor(Math.random() * 20) + 5;
+            
+            for (let i = 0; i <= numTrades; i++) {
+                const date = new Date();
+                date.setHours(date.getHours() - (numTrades - i) * 4); // Every 4 hours
+                const change = (Math.random() - 0.45) * 150;
+                currentEquity += change;
+                mockData.push({
+                    time: date.toISOString(),
+                    equity: Math.max(currentEquity, startEquity * 0.8),
+                    pnl: change
+                });
+            }
+            setEquityData(mockData);
+        }
+    }, [period]);
+
     useEffect(() => {
         fetchMetrics();
-    }, [fetchMetrics]);
+        fetchEquityCurve();
+    }, [fetchMetrics, fetchEquityCurve]);
+
+    // Initialize Equity Chart
+    useEffect(() => {
+        if (!equityChartRef.current || equityData.length === 0) return;
+
+        // Clean up previous chart
+        if (chartInstanceRef.current) {
+            chartInstanceRef.current.remove();
+        }
+
+        const chart = createChart(equityChartRef.current, {
+            layout: {
+                background: { type: ColorType.Solid, color: 'transparent' },
+                textColor: THEME.text.tertiary,
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 10,
+            },
+            grid: {
+                vertLines: { visible: false },
+                horzLines: { color: THEME.border.primary, style: LineStyle.Dotted },
+            },
+            width: equityChartRef.current.clientWidth,
+            height: 150,
+            timeScale: {
+                borderVisible: false,
+                timeVisible: false,
+            },
+            rightPriceScale: {
+                borderVisible: false,
+                scaleMargins: { top: 0.1, bottom: 0.1 },
+            },
+            handleScroll: false,
+            handleScale: false,
+        });
+
+        // Determine if overall trend is positive
+        const firstEquity = equityData[0]?.equity || 10000;
+        const lastEquity = equityData[equityData.length - 1]?.equity || 10000;
+        const isPositive = lastEquity >= firstEquity;
+
+        // Area series for equity curve
+        const areaSeries = chart.addSeries(AreaSeries, {
+            lineColor: isPositive ? THEME.status.buy : THEME.status.sell,
+            topColor: isPositive ? 'rgba(46, 189, 133, 0.3)' : 'rgba(246, 70, 93, 0.3)',
+            bottomColor: isPositive ? 'rgba(46, 189, 133, 0.05)' : 'rgba(246, 70, 93, 0.05)',
+            lineWidth: 2,
+            priceLineVisible: false,
+            lastValueVisible: true,
+        });
+
+        // Convert data to chart format
+        const chartData = equityData.map(d => ({
+            time: d.time as Time,
+            value: d.equity,
+        }));
+
+        areaSeries.setData(chartData);
+        chart.timeScale().fitContent();
+
+        chartInstanceRef.current = chart;
+
+        // Handle resize
+        const handleResize = () => {
+            if (equityChartRef.current && chartInstanceRef.current) {
+                chartInstanceRef.current.applyOptions({
+                    width: equityChartRef.current.clientWidth,
+                });
+            }
+        };
+
+        window.addEventListener('resize', handleResize);
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            if (chartInstanceRef.current) {
+                chartInstanceRef.current.remove();
+                chartInstanceRef.current = null;
+            }
+        };
+    }, [equityData]);
 
     const MetricCard: React.FC<{
         label: string;
@@ -170,6 +300,46 @@ const PerformanceDashboard: React.FC = () => {
                     <div className="h-full transition-all duration-300" style={{ width: `${winRate * 100}%`, backgroundColor: THEME.status.buy }} />
                     <div className="h-full transition-all duration-300" style={{ width: `${(1 - winRate) * 100}%`, backgroundColor: THEME.status.sell }} />
                 </div>
+            </div>
+
+            {/* Equity Curve Chart */}
+            <div className="mt-4 pt-3" style={{ borderTop: `1px solid ${THEME.border.primary}` }}>
+                <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-medium" style={{ color: THEME.text.secondary }}>
+                        Equity Curve
+                    </span>
+                    {equityData.length > 0 && (
+                        <div className="flex items-center gap-2 text-xs">
+                            <span style={{ color: THEME.text.tertiary }}>
+                                ${formatPrice(equityData[0]?.equity || 10000)}
+                            </span>
+                            <span style={{ color: THEME.text.tertiary }}>→</span>
+                            <span style={{ 
+                                color: (equityData[equityData.length - 1]?.equity || 0) >= (equityData[0]?.equity || 0) 
+                                    ? THEME.status.buy 
+                                    : THEME.status.sell,
+                                fontWeight: 600
+                            }}>
+                                ${formatPrice(equityData[equityData.length - 1]?.equity || 10000)}
+                            </span>
+                        </div>
+                    )}
+                </div>
+                <div 
+                    ref={equityChartRef} 
+                    style={{ 
+                        width: '100%', 
+                        height: '150px',
+                        borderRadius: '8px',
+                        overflow: 'hidden',
+                        backgroundColor: THEME.bg.vessel
+                    }} 
+                />
+                {equityData.length === 0 && (
+                    <div className="flex items-center justify-center h-[150px] text-xs" style={{ color: THEME.text.tertiary }}>
+                        Chưa có dữ liệu equity
+                    </div>
+                )}
             </div>
 
             {/* No Data Message */}

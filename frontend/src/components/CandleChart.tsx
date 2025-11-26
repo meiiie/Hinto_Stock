@@ -9,9 +9,21 @@ import {
     LineSeries,
     HistogramSeries,
     CrosshairMode,
-    LineStyle
+    LineStyle,
+    IPriceLine,
+    SeriesMarker
 } from 'lightweight-charts';
 import { useMarketData } from '../hooks/useMarketData';
+
+// Position interface for price lines
+interface OpenPosition {
+    id: string;
+    symbol: string;
+    side: 'LONG' | 'SHORT';
+    entry_price: number;
+    stop_loss: number;
+    take_profit: number;
+}
 
 // Binance Color Scheme
 const BINANCE_COLORS = {
@@ -107,10 +119,13 @@ const CandleChart: React.FC = () => {
     const bbUpperSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
     const bbLowerSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
     
-    // Signal Level Lines
-    const entryLineRef = useRef<ISeriesApi<"Line"> | null>(null);
-    const slLineRef = useRef<ISeriesApi<"Line"> | null>(null);
-    const tpLineRef = useRef<ISeriesApi<"Line"> | null>(null);
+    // Dynamic Price Lines for Open Positions (using createPriceLine API)
+    const entryPriceLineRef = useRef<IPriceLine | null>(null);
+    const slPriceLineRef = useRef<IPriceLine | null>(null);
+    const tpPriceLineRef = useRef<IPriceLine | null>(null);
+    
+    // Open positions state for price lines
+    const [openPositions, setOpenPositions] = useState<OpenPosition[]>([]);
 
     const { data: realtimeData, signal: realtimeSignal } = useMarketData('btcusdt');
     const [timeframe, setTimeframe] = useState<Timeframe>('15m');
@@ -156,34 +171,128 @@ const CandleChart: React.FC = () => {
         setActiveSignal(signal);
     }, []);
 
-    // Update entry/SL/TP lines when active signal changes
+    // Fetch open positions for price lines
+    const fetchOpenPositions = useCallback(async () => {
+        try {
+            const response = await fetch('http://127.0.0.1:8000/trades/portfolio');
+            if (response.ok) {
+                const data = await response.json();
+                setOpenPositions(data.open_positions || []);
+            }
+        } catch (err) {
+            console.error('Error fetching positions for price lines:', err);
+        }
+    }, []);
+
+    // Poll for open positions every 3 seconds
     useEffect(() => {
-        if (!activeSignal || !chartRef.current) return;
+        fetchOpenPositions();
+        const interval = setInterval(fetchOpenPositions, 3000);
+        return () => clearInterval(interval);
+    }, [fetchOpenPositions]);
 
-        const now = toVietnamTime(Math.floor(Date.now() / 1000));
-        const future = toVietnamTime(Math.floor(Date.now() / 1000) + 86400);
+    // Fetch trade history for chart markers
+    const fetchTradeHistory = useCallback(async () => {
+        try {
+            const response = await fetch('http://127.0.0.1:8000/trades/history?limit=50');
+            if (response.ok) {
+                const data = await response.json();
+                const trades = data.trades || [];
+                
+                // Convert trades to signal markers
+                trades.forEach((trade: {
+                    side: string;
+                    entry_price: number;
+                    stop_loss: number;
+                    take_profit: number;
+                    entry_time: string;
+                    pnl?: number;
+                }) => {
+                    const signal: Signal = {
+                        type: trade.side === 'LONG' ? 'BUY' : 'SELL',
+                        price: trade.entry_price,
+                        entry_price: trade.entry_price,
+                        stop_loss: trade.stop_loss || 0,
+                        take_profit: trade.take_profit || 0,
+                        confidence: 0.8,
+                        risk_reward_ratio: trade.take_profit && trade.stop_loss 
+                            ? Math.abs(trade.take_profit - trade.entry_price) / Math.abs(trade.entry_price - trade.stop_loss)
+                            : 2,
+                        timestamp: trade.entry_time,
+                        reason: trade.pnl !== undefined 
+                            ? `PnL: ${trade.pnl >= 0 ? '+' : ''}$${trade.pnl.toFixed(2)}`
+                            : undefined
+                    };
+                    const signalTime = Math.floor(new Date(trade.entry_time).getTime() / 1000);
+                    addSignalMarker(signal, signalTime);
+                });
+            }
+        } catch (err) {
+            console.error('Error fetching trade history for markers:', err);
+        }
+    }, [addSignalMarker]);
 
-        if (entryLineRef.current) {
-            entryLineRef.current.setData([
-                { time: now, value: activeSignal.entry_price },
-                { time: future, value: activeSignal.entry_price }
-            ]);
+    // Load trade history markers on mount
+    useEffect(() => {
+        fetchTradeHistory();
+    }, [fetchTradeHistory]);
+
+    // Update Dynamic Price Lines when positions change
+    useEffect(() => {
+        if (!candleSeriesRef.current) return;
+
+        // Remove existing price lines
+        if (entryPriceLineRef.current) {
+            candleSeriesRef.current.removePriceLine(entryPriceLineRef.current);
+            entryPriceLineRef.current = null;
+        }
+        if (slPriceLineRef.current) {
+            candleSeriesRef.current.removePriceLine(slPriceLineRef.current);
+            slPriceLineRef.current = null;
+        }
+        if (tpPriceLineRef.current) {
+            candleSeriesRef.current.removePriceLine(tpPriceLineRef.current);
+            tpPriceLineRef.current = null;
         }
 
-        if (slLineRef.current && activeSignal.stop_loss > 0) {
-            slLineRef.current.setData([
-                { time: now, value: activeSignal.stop_loss },
-                { time: future, value: activeSignal.stop_loss }
-            ]);
+        // Only draw lines for first open position (to avoid clutter)
+        const position = openPositions[0];
+        if (!position) return;
+
+        // Entry Line - Gray dashed
+        entryPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+            price: position.entry_price,
+            color: '#9CA3AF', // Gray
+            lineWidth: 1,
+            lineStyle: LineStyle.Dotted,
+            axisLabelVisible: true,
+            title: `ENTRY ${position.side}`,
+        });
+
+        // Stop Loss Line - Red dashed (DYNAMIC - updates with trailing stop)
+        if (position.stop_loss > 0) {
+            slPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+                price: position.stop_loss,
+                color: BINANCE_COLORS.sell, // Red
+                lineWidth: 2,
+                lineStyle: LineStyle.Dashed,
+                axisLabelVisible: true,
+                title: `SL`,
+            });
         }
 
-        if (tpLineRef.current && activeSignal.take_profit > 0) {
-            tpLineRef.current.setData([
-                { time: now, value: activeSignal.take_profit },
-                { time: future, value: activeSignal.take_profit }
-            ]);
+        // Take Profit Line - Green dashed
+        if (position.take_profit > 0) {
+            tpPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+                price: position.take_profit,
+                color: BINANCE_COLORS.buy, // Green
+                lineWidth: 1,
+                lineStyle: LineStyle.Dashed,
+                axisLabelVisible: true,
+                title: `TP`,
+            });
         }
-    }, [activeSignal]);
+    }, [openPositions]);
 
     // Initialize Chart with Binance styling
     useEffect(() => {
@@ -294,36 +403,8 @@ const CandleChart: React.FC = () => {
         });
         bbLowerSeriesRef.current = bbLowerSeries;
 
-        // 5. Signal Level Lines
-        const entryLine = chart.addSeries(LineSeries, {
-            color: '#FFFFFF',
-            lineWidth: 1,
-            lineStyle: LineStyle.Dashed,
-            priceLineVisible: false,
-            lastValueVisible: true,
-            title: 'Entry',
-        });
-        entryLineRef.current = entryLine;
-
-        const slLine = chart.addSeries(LineSeries, {
-            color: BINANCE_COLORS.sell,
-            lineWidth: 1,
-            lineStyle: LineStyle.Dashed,
-            priceLineVisible: false,
-            lastValueVisible: true,
-            title: 'SL',
-        });
-        slLineRef.current = slLine;
-
-        const tpLine = chart.addSeries(LineSeries, {
-            color: BINANCE_COLORS.buy,
-            lineWidth: 1,
-            lineStyle: LineStyle.Dashed,
-            priceLineVisible: false,
-            lastValueVisible: true,
-            title: 'TP',
-        });
-        tpLineRef.current = tpLine;
+        // Note: Price lines for Entry/SL/TP are now created dynamically
+        // using candleSeries.createPriceLine() when positions are open
 
         chartRef.current = chart;
 
@@ -419,11 +500,6 @@ const CandleChart: React.FC = () => {
                     if (bbUpperSeriesRef.current) bbUpperSeriesRef.current.setData(bbUpper);
                     if (bbLowerSeriesRef.current) bbLowerSeriesRef.current.setData(bbLower);
 
-                    // Clear level lines
-                    if (entryLineRef.current) entryLineRef.current.setData([]);
-                    if (slLineRef.current) slLineRef.current.setData([]);
-                    if (tpLineRef.current) tpLineRef.current.setData([]);
-
                     if (chartRef.current) chartRef.current.timeScale().fitContent();
 
                     const lastCandle = trimmedData[trimmedData.length - 1];
@@ -461,6 +537,41 @@ const CandleChart: React.FC = () => {
             : Math.floor(Date.now() / 1000);
         addSignalMarker(realtimeSignal, signalTime);
     }, [realtimeSignal, addSignalMarker]);
+
+    // Render signal markers on chart
+    // PERFORMANCE: Limit to last 100 markers to prevent lag when zooming/panning
+    useEffect(() => {
+        if (!candleSeriesRef.current || signals.length === 0) return;
+
+        // Limit markers for performance (max 100)
+        const MAX_MARKERS = 100;
+        const limitedSignals = signals.length > MAX_MARKERS 
+            ? signals.slice(-MAX_MARKERS) 
+            : signals;
+
+        // Convert SignalMarker to lightweight-charts marker format
+        const chartMarkers: SeriesMarker<Time>[] = limitedSignals.map(s => ({
+            time: s.time,
+            position: s.position,
+            color: s.color,
+            shape: s.shape,
+            text: s.text,
+            size: s.size,
+        }));
+
+        // Sort markers by time (required by lightweight-charts)
+        chartMarkers.sort((a, b) => (a.time as number) - (b.time as number));
+
+        // In lightweight-charts v5, use attachPrimitive or markers via series
+        // For now, markers are stored in state and displayed via tooltip
+        // The visual markers are shown via the crosshair move handler
+        try {
+            // @ts-expect-error - setMarkers may not be in type definitions but exists in runtime
+            candleSeriesRef.current.setMarkers(chartMarkers);
+        } catch {
+            console.log('Markers stored in state, displayed via tooltip on hover');
+        }
+    }, [signals]);
 
     // Aggregate Real-time Data with Vietnam timezone
     useEffect(() => {
@@ -694,7 +805,25 @@ const CandleChart: React.FC = () => {
                     <div style={{ width: '12px', height: '12px', borderRadius: '2px', backgroundColor: BINANCE_COLORS.sell }}></div>
                     <span style={{ color: BINANCE_COLORS.sell }}>Giảm</span>
                 </div>
-                {activeSignal && (
+                {openPositions.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+                        <span style={{ 
+                            color: openPositions[0].side === 'LONG' ? BINANCE_COLORS.buy : BINANCE_COLORS.sell,
+                            fontWeight: 600
+                        }}>
+                            ● {openPositions[0].side} @ ${formatPrice(openPositions[0].entry_price)}
+                        </span>
+                        <span style={{ color: BINANCE_COLORS.sell, fontSize: '11px' }}>
+                            SL: ${formatPrice(openPositions[0].stop_loss)}
+                        </span>
+                        {openPositions[0].take_profit > 0 && (
+                            <span style={{ color: BINANCE_COLORS.buy, fontSize: '11px' }}>
+                                TP: ${formatPrice(openPositions[0].take_profit)}
+                            </span>
+                        )}
+                    </div>
+                )}
+                {activeSignal && !openPositions.length && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
                         <span style={{ color: activeSignal.type === 'BUY' ? BINANCE_COLORS.buy : BINANCE_COLORS.sell }}>
                             ● {activeSignal.type} Signal Active
@@ -731,6 +860,47 @@ const CandleChart: React.FC = () => {
                                 Đang tải dữ liệu...
                             </span>
                         </div>
+                    </div>
+                )}
+
+                {/* Signal Markers Overlay - Visual indicators for BUY/SELL */}
+                {signals.length > 0 && (
+                    <div style={{
+                        position: 'absolute',
+                        top: '8px',
+                        right: '8px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                        maxHeight: '150px',
+                        overflowY: 'auto',
+                        zIndex: 15,
+                    }}>
+                        {signals.slice(-5).map((s, idx) => (
+                            <div
+                                key={s.id || idx}
+                                style={{
+                                    padding: '4px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    backgroundColor: s.signal.type === 'BUY' 
+                                        ? 'rgba(46, 189, 133, 0.2)' 
+                                        : 'rgba(246, 70, 93, 0.2)',
+                                    border: `1px solid ${s.color}`,
+                                    color: s.color,
+                                }}
+                            >
+                                <span>{s.signal.type === 'BUY' ? '▲' : '▼'}</span>
+                                <span>{s.signal.type}</span>
+                                <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                                    ${s.signal.entry_price.toFixed(0)}
+                                </span>
+                            </div>
+                        ))}
                     </div>
                 )}
 

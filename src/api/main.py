@@ -5,6 +5,7 @@ import asyncio
 import logging
 
 from src.api.routers import system, market, settings, trades
+from src.api.routers.market import market_router
 from src.api.dependencies import get_realtime_service
 
 # Configure logging
@@ -53,6 +54,7 @@ app.add_middleware(
 # Include Routers
 app.include_router(system.router)
 app.include_router(market.router)
+app.include_router(market_router)  # /market/* endpoints
 app.include_router(settings.router)
 app.include_router(trades.router)
 

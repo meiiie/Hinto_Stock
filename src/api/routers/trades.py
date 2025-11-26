@@ -132,3 +132,201 @@ async def reset_account(
     """
     paper_service.reset_account()
     return {"success": True, "message": "Account reset to $10,000"}
+
+
+@router.post("/simulate")
+async def simulate_signal(
+    signal_data: dict,
+    service: RealtimeService = Depends(get_realtime_service),
+    paper_service: PaperTradingService = Depends(get_paper_trading_service)
+):
+    """
+    Simulate a BUY/SELL signal for testing purposes.
+    
+    This is a DEBUG endpoint to test the trade execution flow
+    without waiting for real signals from the strategy.
+    
+    Args:
+        signal_data: {"signal_type": "BUY" | "SELL"}
+        
+    Returns:
+        Trade execution result
+    """
+    signal_type = signal_data.get("signal_type", "BUY").upper()
+    
+    if signal_type not in ["BUY", "SELL"]:
+        return {"success": False, "error": "Invalid signal type. Use BUY or SELL"}
+    
+    # Get current price
+    latest_candle = service.get_latest_data('1m')
+    if not latest_candle or latest_candle.close <= 0:
+        return {"success": False, "error": "Cannot determine current price"}
+    
+    current_price = latest_candle.close
+    
+    # Calculate SL/TP based on default risk settings
+    # Default: 1.5% risk, 1.5 R:R ratio
+    risk_percent = 0.015  # 1.5%
+    rr_ratio = 1.5
+    
+    if signal_type == "BUY":
+        stop_loss = current_price * (1 - risk_percent)
+        take_profit = current_price * (1 + risk_percent * rr_ratio)
+        side = "LONG"
+    else:
+        stop_loss = current_price * (1 + risk_percent)
+        take_profit = current_price * (1 - risk_percent * rr_ratio)
+        side = "SHORT"
+    
+    # Execute the simulated trade
+    try:
+        trade = paper_service.execute_trade(
+            symbol="BTCUSDT",
+            side=side,
+            entry_price=current_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            signal_confidence=0.75,  # Default confidence for test
+            signal_reason=f"SIMULATED_{signal_type}_SIGNAL"
+        )
+        
+        if trade:
+            return {
+                "success": True,
+                "trade_id": trade.id,
+                "entry_price": trade.entry_price,
+                "stop_loss": trade.stop_loss,
+                "take_profit": trade.take_profit,
+                "side": trade.side,
+                "quantity": trade.quantity
+            }
+        else:
+            return {"success": False, "error": "Trade execution failed"}
+            
+    except Exception as e:
+        logger.error(f"Simulate signal error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/equity-curve")
+async def get_equity_curve(
+    days: int = Query(default=7, ge=1, le=365, description="Number of days"),
+    resolution: str = Query(default="trade", description="Resolution: 'trade' (per-trade) or 'daily'"),
+    paper_service: PaperTradingService = Depends(get_paper_trading_service)
+):
+    """
+    Get equity curve data for charting.
+    
+    **Validates: Requirements 7.3 - Performance visualization**
+    
+    Returns equity values based on trade history.
+    Resolution can be 'trade' (per-trade, recommended for 15m strategy) or 'daily'.
+    
+    Args:
+        days: Number of days to include (default: 7)
+        resolution: 'trade' for per-trade updates, 'daily' for daily aggregation
+        
+    Returns:
+        List of {time, equity, pnl, trade_id?} points
+    """
+    from datetime import datetime, timedelta
+    
+    # Get all trades for the period
+    result = paper_service.get_trade_history(page=1, limit=1000)
+    trades = result.trades
+    
+    # Calculate equity curve
+    initial_balance = 10000.0
+    equity_curve = []
+    
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days)
+    
+    if resolution == "trade":
+        # TRADE-BY-TRADE RESOLUTION (New - for 15m strategy monitoring)
+        # Each point represents equity after a trade closes
+        
+        # Filter trades within the period and sort by exit_time
+        period_trades = [
+            t for t in trades 
+            if t.exit_time and t.exit_time >= start_date
+        ]
+        period_trades.sort(key=lambda t: t.exit_time)
+        
+        # Start with initial balance point
+        equity_curve.append({
+            "time": start_date.strftime('%Y-%m-%dT%H:%M:%S'),
+            "equity": initial_balance,
+            "pnl": 0.0,
+            "trade_id": None
+        })
+        
+        cumulative_pnl = 0.0
+        
+        # Add a point for each closed trade
+        for trade in period_trades:
+            if trade.pnl is not None:
+                cumulative_pnl += trade.pnl
+                current_equity = initial_balance + cumulative_pnl
+                
+                equity_curve.append({
+                    "time": trade.exit_time.strftime('%Y-%m-%dT%H:%M:%S'),
+                    "equity": round(current_equity, 2),
+                    "pnl": round(trade.pnl, 2),
+                    "trade_id": trade.id,
+                    "side": trade.side,
+                    "result": "WIN" if trade.pnl > 0 else "LOSS"
+                })
+        
+        # Add current point (latest equity)
+        if equity_curve:
+            equity_curve.append({
+                "time": end_date.strftime('%Y-%m-%dT%H:%M:%S'),
+                "equity": equity_curve[-1]["equity"],
+                "pnl": 0.0,
+                "trade_id": None
+            })
+    else:
+        # DAILY RESOLUTION (Original)
+        current_equity = initial_balance
+        cumulative_pnl = 0.0
+        
+        # Group trades by date
+        trades_by_date = {}
+        for trade in trades:
+            if trade.exit_time:
+                trade_date = trade.exit_time.strftime('%Y-%m-%d')
+                if trade_date not in trades_by_date:
+                    trades_by_date[trade_date] = []
+                trades_by_date[trade_date].append(trade)
+        
+        # Build equity curve day by day
+        current_date = start_date
+        while current_date <= end_date:
+            date_str = current_date.strftime('%Y-%m-%d')
+            
+            # Add PnL from trades closed on this day
+            daily_pnl = 0.0
+            if date_str in trades_by_date:
+                for trade in trades_by_date[date_str]:
+                    if trade.pnl is not None:
+                        daily_pnl += trade.pnl
+            
+            cumulative_pnl += daily_pnl
+            current_equity = initial_balance + cumulative_pnl
+            
+            equity_curve.append({
+                "time": date_str,
+                "equity": round(current_equity, 2),
+                "pnl": round(daily_pnl, 2)
+            })
+            
+            current_date += timedelta(days=1)
+    
+    # Include current portfolio balance for consistency check
+    return {
+        "equity_curve": equity_curve,
+        "resolution": resolution,
+        "initial_balance": initial_balance,
+        "current_equity": equity_curve[-1]["equity"] if equity_curve else initial_balance
+    }

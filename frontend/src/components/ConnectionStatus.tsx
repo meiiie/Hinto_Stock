@@ -9,18 +9,33 @@ interface SystemStatus {
     connections?: number;
 }
 
+interface ReconnectState {
+    isReconnecting: boolean;
+    retryCount: number;
+    nextRetryIn: number;
+}
+
 interface ConnectionStatusProps {
     isConnected: boolean;
     error?: string | null;
+    reconnectState?: ReconnectState;
+    onReconnectNow?: () => void;
 }
 
 /**
  * Connection Status Component - Binance Style
- * Shows Online/Offline indicator and service info
+ * Shows Online/Offline/Reconnecting indicator with countdown
+ * 
+ * **Feature: desktop-trading-dashboard**
+ * **Validates: Requirements 1.1 - WebSocket connection status**
  */
-const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ isConnected, error }) => {
+const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ 
+    isConnected, 
+    error, 
+    reconnectState,
+    onReconnectNow 
+}) => {
     const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
-    const [isReconnecting, setIsReconnecting] = useState(false);
 
     useEffect(() => {
         const fetchStatus = async () => {
@@ -40,35 +55,106 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ isConnected, error 
         return () => clearInterval(interval);
     }, []);
 
-    useEffect(() => {
-        setIsReconnecting(!isConnected && !error);
-    }, [isConnected, error]);
+    const isReconnecting = reconnectState?.isReconnecting || false;
 
     const getStatusConfig = () => {
-        if (isConnected) return { color: THEME.status.buy, bg: THEME.alpha.buyBg, text: 'Trực tuyến' };
-        if (isReconnecting) return { color: THEME.accent.yellow, bg: THEME.alpha.warningBg, text: 'Đang kết nối...' };
-        return { color: THEME.status.sell, bg: THEME.alpha.sellBg, text: 'Mất kết nối' };
+        if (isConnected) {
+            return { 
+                color: THEME.status.buy, 
+                bg: THEME.alpha.buyBg, 
+                text: 'Live',
+                icon: '🟢',
+                showPulse: true
+            };
+        }
+        if (isReconnecting) {
+            const countdown = reconnectState?.nextRetryIn || 0;
+            const retryNum = (reconnectState?.retryCount || 0) + 1;
+            return { 
+                color: THEME.accent.yellow, 
+                bg: THEME.alpha.warningBg, 
+                text: `Reconnecting in ${countdown}s... (attempt ${retryNum})`,
+                icon: '🟡',
+                showPulse: true
+            };
+        }
+        return { 
+            color: THEME.status.sell, 
+            bg: THEME.alpha.sellBg, 
+            text: 'Disconnected',
+            icon: '🔴',
+            showPulse: false
+        };
     };
 
     const status = getStatusConfig();
+    const showReconnectButton = !isConnected && onReconnectNow;
 
     return (
-        <div className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ backgroundColor: THEME.bg.secondary }}>
+        <div 
+            style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '12px', 
+                borderRadius: '8px', 
+                padding: '8px 12px',
+                backgroundColor: THEME.bg.secondary 
+            }}
+        >
             {/* Status Indicator */}
-            <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${isReconnecting ? 'animate-pulse' : ''}`} style={{ backgroundColor: status.color }} />
-                <span className="text-xs font-medium" style={{ color: status.color }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div 
+                    style={{ 
+                        width: '8px', 
+                        height: '8px', 
+                        borderRadius: '50%',
+                        backgroundColor: status.color,
+                        animation: status.showPulse ? 'pulse 2s infinite' : 'none'
+                    }} 
+                />
+                <span 
+                    style={{ 
+                        fontSize: '12px', 
+                        fontWeight: 500,
+                        color: status.color 
+                    }}
+                >
                     {status.text}
                 </span>
             </div>
 
+            {/* Reconnect Now Button */}
+            {showReconnectButton && (
+                <>
+                    <div style={{ width: '1px', height: '16px', backgroundColor: THEME.border.primary }} />
+                    <button
+                        onClick={onReconnectNow}
+                        style={{
+                            padding: '4px 8px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            color: THEME.text.primary,
+                            backgroundColor: THEME.accent.yellow,
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            transition: 'opacity 0.2s'
+                        }}
+                        onMouseOver={(e) => e.currentTarget.style.opacity = '0.8'}
+                        onMouseOut={(e) => e.currentTarget.style.opacity = '1'}
+                    >
+                        Reconnect Now
+                    </button>
+                </>
+            )}
+
             {/* Divider */}
-            <div className="w-px h-4" style={{ backgroundColor: THEME.border.primary }} />
+            <div style={{ width: '1px', height: '16px', backgroundColor: THEME.border.primary }} />
 
             {/* Service Info */}
             {systemStatus && (
-                <div className="flex items-center gap-2 text-xs" style={{ color: THEME.text.tertiary }}>
-                    <span className="font-semibold" style={{ color: THEME.text.secondary }}>{systemStatus.service}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: THEME.text.tertiary }}>
+                    <span style={{ fontWeight: 600, color: THEME.text.secondary }}>{systemStatus.service}</span>
                     <span>v{systemStatus.version}</span>
                 </div>
             )}
@@ -76,10 +162,18 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ isConnected, error 
             {/* Error Message */}
             {error && (
                 <>
-                    <div className="w-px h-4" style={{ backgroundColor: THEME.border.primary }} />
-                    <span className="text-xs" style={{ color: THEME.status.sell }}>{error}</span>
+                    <div style={{ width: '1px', height: '16px', backgroundColor: THEME.border.primary }} />
+                    <span style={{ fontSize: '12px', color: THEME.status.sell }}>{error}</span>
                 </>
             )}
+
+            {/* CSS for pulse animation */}
+            <style>{`
+                @keyframes pulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.5; }
+                }
+            `}</style>
         </div>
     );
 };

@@ -300,6 +300,7 @@ class BinanceWebSocketClient:
             
             # Notify candle callbacks if parsing successful
             if candle:
+                self.logger.info(f"📊 Candle: {candle.close:.2f} - notifying {len(self._candle_callbacks)} callbacks")
                 for callback in self._candle_callbacks:
                     try:
                         if asyncio.iscoroutinefunction(callback):
@@ -307,7 +308,7 @@ class BinanceWebSocketClient:
                         else:
                             callback(candle, metadata)
                     except Exception as e:
-                        self.logger.error(f"Error in candle callback: {e}")
+                        self.logger.error(f"Error in candle callback: {e}", exc_info=True)
         
         except json.JSONDecodeError as e:
             self.logger.error(f"Failed to parse message: {e}")

@@ -25,6 +25,12 @@ router = APIRouter(
     tags=["market"]
 )
 
+# Additional router for /market prefix (for frontend compatibility)
+market_router = APIRouter(
+    prefix="/market",
+    tags=["market-rest"]
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,9 +54,12 @@ def _setup_service_bridge(service: RealtimeService, manager: WebSocketManager) -
     def on_update():
         """Bridge callback - called when RealtimeService has new data."""
         try:
+            logger.debug("on_update callback triggered")
+            
             # Get latest data from service
             data = service.get_latest_indicators(timeframe='1m')
             if not data:
+                logger.debug("No indicator data available")
                 return
             
             # Add candle info
@@ -80,8 +89,21 @@ def _setup_service_bridge(service: RealtimeService, manager: WebSocketManager) -
                 }
             
             # Schedule broadcast (fire and forget)
-            # Broadcast to all clients subscribed to this symbol
-            asyncio.create_task(manager.broadcast(data, symbol=service.symbol))
+            # Use get_running_loop() to safely create task from sync callback
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(manager.broadcast(data, symbol=service.symbol))
+            except RuntimeError:
+                # No running loop - try get_event_loop for compatibility
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.create_task(manager.broadcast(data, symbol=service.symbol))
+                    else:
+                        # Run synchronously as fallback
+                        asyncio.run(manager.broadcast(data, symbol=service.symbol))
+                except Exception as e:
+                    logger.warning(f"Could not broadcast: {e}")
             
         except Exception as e:
             logger.error(f"Error in service bridge: {e}")
@@ -105,7 +127,19 @@ def _setup_service_bridge(service: RealtimeService, manager: WebSocketManager) -
                 }
             }
             
-            asyncio.create_task(manager.broadcast(signal_data, symbol=service.symbol))
+            # Use get_running_loop() to safely create task from sync callback
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(manager.broadcast(signal_data, symbol=service.symbol))
+            except RuntimeError:
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.create_task(manager.broadcast(signal_data, symbol=service.symbol))
+                    else:
+                        asyncio.run(manager.broadcast(signal_data, symbol=service.symbol))
+                except Exception as e:
+                    logger.warning(f"Could not broadcast signal: {e}")
             
         except Exception as e:
             logger.error(f"Error broadcasting signal: {e}")
@@ -268,3 +302,26 @@ async def get_active_connections():
     """
     manager = get_websocket_manager()
     return manager.get_all_connections_info()
+
+
+# ============ /market/* endpoints for frontend compatibility ============
+
+@market_router.get("/history")
+async def get_market_history_rest(
+    symbol: str = Query(default='btcusdt'),
+    limit: int = Query(default=100, ge=1, le=1000),
+    service: RealtimeService = Depends(get_realtime_service)
+):
+    """
+    Get historical market data (REST endpoint for frontend).
+    
+    Used by useMarketData hook for data gap filling after reconnect.
+    
+    Args:
+        symbol: Trading pair symbol (default: btcusdt)
+        limit: Number of candles to return (max 1000)
+        
+    Returns:
+        List of candles with indicators
+    """
+    return service.get_historical_data_with_indicators('15m', limit)

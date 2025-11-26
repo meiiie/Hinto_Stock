@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useMarketData } from '../hooks/useMarketData';
-import { THEME, formatPrice, formatVietnamDate } from '../styles/theme';
+import { THEME, formatPrice } from '../styles/theme';
 
 interface Position {
     id: string;
@@ -25,8 +25,8 @@ interface PortfolioData {
 }
 
 /**
- * Portfolio Component - Binance Style
- * Displays virtual balance, equity, unrealized PnL, and open positions
+ * Portfolio Component - Binance Style with Inline Styles
+ * Fixed for Tailwind v4 compatibility
  */
 const Portfolio: React.FC = () => {
     const [portfolio, setPortfolio] = useState<PortfolioData | null>(null);
@@ -73,13 +73,71 @@ const Portfolio: React.FC = () => {
         }
     };
 
+    const handleCloseAll = async () => {
+        if (!portfolio?.open_positions.length) return;
+        if (!confirm(`Đóng tất cả ${portfolio.open_positions.length} vị thế? Hành động này không thể hoàn tác.`)) {
+            return;
+        }
+        try {
+            for (const position of portfolio.open_positions) {
+                await fetch(`http://127.0.0.1:8000/trades/close/${position.id}`, { method: 'POST' });
+            }
+            fetchPortfolio();
+        } catch (err) {
+            console.error('Error closing all positions:', err);
+        }
+    };
+
+    // Styles
+    const containerStyle: React.CSSProperties = {
+        backgroundColor: THEME.bg.secondary,
+        border: `1px solid ${THEME.border.primary}`,
+        borderRadius: '8px',
+        padding: '16px',
+    };
+
+    const headerStyle: React.CSSProperties = {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingBottom: '12px',
+        borderBottom: `1px solid ${THEME.border.primary}`,
+        marginBottom: '16px',
+    };
+
+    const gridStyle: React.CSSProperties = {
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: '12px',
+        marginBottom: '16px',
+    };
+
+    const cardStyle: React.CSSProperties = {
+        backgroundColor: THEME.bg.vessel,
+        borderRadius: '4px',
+        padding: '12px',
+    };
+
+    const labelStyle: React.CSSProperties = {
+        fontSize: '12px',
+        color: THEME.text.tertiary,
+        marginBottom: '4px',
+    };
+
+    const valueStyle: React.CSSProperties = {
+        fontSize: '20px',
+        fontWeight: 700,
+        fontFamily: 'monospace',
+        color: THEME.text.primary,
+    };
+
     if (isLoading) {
         return (
-            <div className="rounded-lg p-4" style={{ backgroundColor: THEME.bg.secondary, border: `1px solid ${THEME.border.primary}` }}>
-                <div className="animate-pulse space-y-3">
-                    <div className="h-4 rounded w-1/3" style={{ backgroundColor: THEME.bg.vessel }}></div>
-                    <div className="h-8 rounded" style={{ backgroundColor: THEME.bg.vessel }}></div>
-                    <div className="h-8 rounded" style={{ backgroundColor: THEME.bg.vessel }}></div>
+            <div style={containerStyle}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ height: '16px', backgroundColor: THEME.bg.vessel, borderRadius: '4px', width: '33%' }}></div>
+                    <div style={{ height: '32px', backgroundColor: THEME.bg.vessel, borderRadius: '4px' }}></div>
+                    <div style={{ height: '32px', backgroundColor: THEME.bg.vessel, borderRadius: '4px' }}></div>
                 </div>
             </div>
         );
@@ -87,8 +145,8 @@ const Portfolio: React.FC = () => {
 
     if (error) {
         return (
-            <div className="rounded-lg p-4" style={{ backgroundColor: THEME.bg.secondary, border: `1px solid ${THEME.status.sell}` }}>
-                <p className="text-sm" style={{ color: THEME.status.sell }}>{error}</p>
+            <div style={{ ...containerStyle, borderColor: THEME.status.sell }}>
+                <p style={{ fontSize: '14px', color: THEME.status.sell, margin: 0 }}>{error}</p>
             </div>
         );
     }
@@ -96,42 +154,52 @@ const Portfolio: React.FC = () => {
     const totalUnrealizedPnL = portfolio?.open_positions.reduce((sum, pos) => sum + calculatePositionPnL(pos), 0) || 0;
 
     return (
-        <div className="rounded-lg p-4 space-y-4" style={{ backgroundColor: THEME.bg.secondary, border: `1px solid ${THEME.border.primary}` }}>
+        <div style={containerStyle}>
             {/* Header */}
-            <div className="flex justify-between items-center pb-3" style={{ borderBottom: `1px solid ${THEME.border.primary}` }}>
-                <h2 className="text-lg font-bold" style={{ color: THEME.text.primary }}>Portfolio</h2>
-                <span className="text-xs px-2 py-1 rounded" style={{ backgroundColor: THEME.alpha.warningBg, color: THEME.accent.yellow }}>
+            <div style={headerStyle}>
+                <h2 style={{ fontSize: '18px', fontWeight: 700, color: THEME.text.primary, margin: 0 }}>Portfolio</h2>
+                <span style={{ 
+                    fontSize: '12px', 
+                    padding: '4px 8px', 
+                    borderRadius: '4px', 
+                    backgroundColor: THEME.alpha.warningBg, 
+                    color: THEME.accent.yellow 
+                }}>
                     Paper Trading
                 </span>
             </div>
 
             {/* Balance Summary */}
-            <div className="grid grid-cols-2 gap-3">
-                <div className="rounded p-3" style={{ backgroundColor: THEME.bg.vessel }}>
-                    <div className="text-xs mb-1" style={{ color: THEME.text.tertiary }}>Số dư</div>
-                    <div className="text-xl font-bold font-mono" style={{ color: THEME.text.primary }}>
-                        ${formatPrice(portfolio?.balance || 0)}
-                    </div>
+            <div style={gridStyle}>
+                <div style={cardStyle}>
+                    <div style={labelStyle}>Số dư</div>
+                    <div style={valueStyle}>${formatPrice(portfolio?.balance || 0)}</div>
                 </div>
-                <div className="rounded p-3" style={{ backgroundColor: THEME.bg.vessel }}>
-                    <div className="text-xs mb-1" style={{ color: THEME.text.tertiary }}>Vốn chủ sở hữu</div>
-                    <div className="text-xl font-bold font-mono" style={{ color: THEME.text.primary }}>
-                        ${formatPrice((portfolio?.balance || 0) + totalUnrealizedPnL)}
-                    </div>
+                <div style={cardStyle}>
+                    <div style={labelStyle}>Vốn chủ sở hữu</div>
+                    <div style={valueStyle}>${formatPrice((portfolio?.balance || 0) + totalUnrealizedPnL)}</div>
                 </div>
             </div>
 
             {/* PnL Summary */}
-            <div className="grid grid-cols-2 gap-3">
-                <div className="rounded p-3" style={{ backgroundColor: THEME.bg.vessel }}>
-                    <div className="text-xs mb-1" style={{ color: THEME.text.tertiary }}>Lãi/Lỗ chưa thực hiện</div>
-                    <div className="text-lg font-bold font-mono" style={{ color: totalUnrealizedPnL >= 0 ? THEME.status.buy : THEME.status.sell }}>
+            <div style={gridStyle}>
+                <div style={cardStyle}>
+                    <div style={labelStyle}>Lãi/Lỗ chưa thực hiện</div>
+                    <div style={{ 
+                        ...valueStyle, 
+                        fontSize: '18px',
+                        color: totalUnrealizedPnL >= 0 ? THEME.status.buy : THEME.status.sell 
+                    }}>
                         {totalUnrealizedPnL >= 0 ? '+' : ''}{formatPrice(totalUnrealizedPnL)}
                     </div>
                 </div>
-                <div className="rounded p-3" style={{ backgroundColor: THEME.bg.vessel }}>
-                    <div className="text-xs mb-1" style={{ color: THEME.text.tertiary }}>Lãi/Lỗ đã thực hiện</div>
-                    <div className="text-lg font-bold font-mono" style={{ color: (portfolio?.realized_pnl || 0) >= 0 ? THEME.status.buy : THEME.status.sell }}>
+                <div style={cardStyle}>
+                    <div style={labelStyle}>Lãi/Lỗ đã thực hiện</div>
+                    <div style={{ 
+                        ...valueStyle, 
+                        fontSize: '18px',
+                        color: (portfolio?.realized_pnl || 0) >= 0 ? THEME.status.buy : THEME.status.sell 
+                    }}>
                         {(portfolio?.realized_pnl || 0) >= 0 ? '+' : ''}{formatPrice(portfolio?.realized_pnl || 0)}
                     </div>
                 </div>
@@ -139,67 +207,111 @@ const Portfolio: React.FC = () => {
 
             {/* Open Positions */}
             <div>
-                <div className="flex justify-between items-center mb-2">
-                    <h3 className="text-sm font-semibold" style={{ color: THEME.text.secondary }}>Vị thế đang mở</h3>
-                    <span className="text-xs" style={{ color: THEME.text.tertiary }}>
-                        {portfolio?.open_positions.length || 0} vị thế
-                    </span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <h3 style={{ fontSize: '14px', fontWeight: 600, color: THEME.text.secondary, margin: 0 }}>Vị thế đang mở</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '12px', color: THEME.text.tertiary }}>
+                            {portfolio?.open_positions.length || 0} vị thế
+                        </span>
+                        {(portfolio?.open_positions.length || 0) > 0 && (
+                            <button
+                                onClick={handleCloseAll}
+                                style={{ 
+                                    fontSize: '12px',
+                                    padding: '4px 12px',
+                                    borderRadius: '4px',
+                                    fontWeight: 700,
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    backgroundColor: THEME.status.sell, 
+                                    color: '#fff',
+                                    boxShadow: '0 2px 8px rgba(246, 70, 93, 0.4)'
+                                }}
+                            >
+                                🚨 ĐÓNG TẤT CẢ
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 {portfolio?.open_positions.length === 0 ? (
-                    <div className="text-center py-6 text-sm" style={{ color: THEME.text.tertiary }}>
+                    <div style={{ textAlign: 'center', padding: '24px', fontSize: '14px', color: THEME.text.tertiary }}>
                         Không có vị thế nào
                     </div>
                 ) : (
-                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '256px', overflowY: 'auto' }}>
                         {portfolio?.open_positions.map((position) => {
                             const pnl = calculatePositionPnL(position);
                             const pnlPercent = position.margin > 0 ? (pnl / position.margin) * 100 : 0;
                             
                             return (
-                                <div key={position.id} className="rounded p-3" style={{ backgroundColor: THEME.bg.vessel, border: `1px solid ${THEME.border.primary}` }}>
-                                    <div className="flex justify-between items-start mb-2">
-                                        <div className="flex items-center gap-2">
-                                            <span className="px-2 py-0.5 rounded text-xs font-bold" style={{
+                                <div key={position.id} style={{ 
+                                    ...cardStyle, 
+                                    border: `1px solid ${THEME.border.primary}` 
+                                }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <span style={{
+                                                padding: '2px 8px',
+                                                borderRadius: '4px',
+                                                fontSize: '12px',
+                                                fontWeight: 700,
                                                 backgroundColor: position.side === 'LONG' ? THEME.alpha.buyBg : THEME.alpha.sellBg,
                                                 color: position.side === 'LONG' ? THEME.status.buy : THEME.status.sell
                                             }}>
                                                 {position.side === 'LONG' ? 'MUA' : 'BÁN'}
                                             </span>
-                                            <span className="font-semibold" style={{ color: THEME.text.primary }}>{position.symbol}</span>
+                                            <span style={{ fontWeight: 600, color: THEME.text.primary }}>{position.symbol}</span>
                                         </div>
-                                        <button onClick={() => handleClosePosition(position.id)}
-                                            className="text-xs px-2 py-1 rounded transition-colors hover:opacity-80"
-                                            style={{ backgroundColor: THEME.status.sell, color: '#fff' }}>
+                                        <button 
+                                            onClick={() => handleClosePosition(position.id)}
+                                            style={{
+                                                fontSize: '12px',
+                                                padding: '4px 8px',
+                                                borderRadius: '4px',
+                                                border: 'none',
+                                                cursor: 'pointer',
+                                                backgroundColor: THEME.status.sell,
+                                                color: '#fff'
+                                            }}
+                                        >
                                             Đóng
                                         </button>
                                     </div>
                                     
-                                    <div className="grid grid-cols-3 gap-2 text-xs">
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '12px' }}>
                                         <div>
                                             <span style={{ color: THEME.text.tertiary }}>Entry</span>
-                                            <div className="font-mono" style={{ color: THEME.text.primary }}>${formatPrice(position.entry_price)}</div>
+                                            <div style={{ fontFamily: 'monospace', color: THEME.text.primary }}>${formatPrice(position.entry_price)}</div>
                                         </div>
                                         <div>
                                             <span style={{ color: THEME.text.tertiary }}>Size</span>
-                                            <div className="font-mono" style={{ color: THEME.text.primary }}>{position.quantity.toFixed(4)}</div>
+                                            <div style={{ fontFamily: 'monospace', color: THEME.text.primary }}>{position.quantity.toFixed(4)}</div>
                                         </div>
                                         <div>
                                             <span style={{ color: THEME.text.tertiary }}>P&L</span>
-                                            <div className="font-mono font-bold" style={{ color: pnl >= 0 ? THEME.status.buy : THEME.status.sell }}>
+                                            <div style={{ fontFamily: 'monospace', fontWeight: 700, color: pnl >= 0 ? THEME.status.buy : THEME.status.sell }}>
                                                 {pnl >= 0 ? '+' : ''}{formatPrice(pnl)} ({pnlPercent.toFixed(1)}%)
                                             </div>
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-2 text-xs mt-2 pt-2" style={{ borderTop: `1px solid ${THEME.border.primary}` }}>
+                                    <div style={{ 
+                                        display: 'grid', 
+                                        gridTemplateColumns: '1fr 1fr', 
+                                        gap: '8px', 
+                                        fontSize: '12px', 
+                                        marginTop: '8px', 
+                                        paddingTop: '8px', 
+                                        borderTop: `1px solid ${THEME.border.primary}` 
+                                    }}>
                                         <div>
                                             <span style={{ color: THEME.text.tertiary }}>SL</span>
-                                            <span className="font-mono ml-2" style={{ color: THEME.status.sell }}>${formatPrice(position.stop_loss)}</span>
+                                            <span style={{ fontFamily: 'monospace', marginLeft: '8px', color: THEME.status.sell }}>${formatPrice(position.stop_loss)}</span>
                                         </div>
                                         <div>
                                             <span style={{ color: THEME.text.tertiary }}>TP</span>
-                                            <span className="font-mono ml-2" style={{ color: THEME.status.buy }}>${formatPrice(position.take_profit)}</span>
+                                            <span style={{ fontFamily: 'monospace', marginLeft: '8px', color: THEME.status.buy }}>${formatPrice(position.take_profit)}</span>
                                         </div>
                                     </div>
                                 </div>

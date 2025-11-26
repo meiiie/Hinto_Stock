@@ -46,7 +46,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<Tab>('chart');
   const [bottomTab, setBottomTab] = useState<BottomTab>('positions');
   const [isBottomPanelHidden, setIsBottomPanelHidden] = useState(false);
-  const { data: marketData, isConnected } = useMarketData('btcusdt');
+  const { data: marketData, isConnected, reconnectState, reconnectNow } = useMarketData('btcusdt');
   const [signalLogs, setSignalLogs] = useState<SignalLog[]>([
     { id: 1, time: '18:40:05', action: 'INIT', adx: 0, trend: 'NEUTRAL' },
     { id: 2, time: '18:40:06', action: 'CONN', adx: 0, trend: 'NEUTRAL' },
@@ -282,9 +282,39 @@ function App() {
                 </button>
                 
                 {/* Connection Status */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: isConnected ? C.up : C.down }}>
-                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: isConnected ? C.up : C.down }} />
-                  <span style={{ fontSize: '12px', fontWeight: 500 }}>{isConnected ? 'LIVE' : 'DISCONNECTED'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ 
+                    width: '6px', 
+                    height: '6px', 
+                    borderRadius: '50%', 
+                    backgroundColor: isConnected ? C.up : (reconnectState.isReconnecting ? C.yellow : C.down),
+                    animation: reconnectState.isReconnecting ? 'pulse 1s infinite' : 'none'
+                  }} />
+                  <span style={{ 
+                    fontSize: '12px', 
+                    fontWeight: 500,
+                    color: isConnected ? C.up : (reconnectState.isReconnecting ? C.yellow : C.down)
+                  }}>
+                    {isConnected ? 'LIVE' : (reconnectState.isReconnecting ? `Reconnecting ${reconnectState.nextRetryIn}s...` : 'DISCONNECTED')}
+                  </span>
+                  {!isConnected && (
+                    <button
+                      onClick={reconnectNow}
+                      style={{
+                        marginLeft: '8px',
+                        padding: '2px 8px',
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        color: '#000',
+                        backgroundColor: C.yellow,
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Reconnect
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

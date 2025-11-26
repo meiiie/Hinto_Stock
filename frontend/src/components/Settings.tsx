@@ -10,8 +10,8 @@ interface TradingSettings {
 }
 
 /**
- * Settings Component - Binance Style
- * Allows editing Risk %, R:R ratio, and displays strategy parameters
+ * Settings Component - Binance Style with Inline Styles
+ * Fixed for Tailwind v4 compatibility
  */
 const Settings: React.FC = () => {
     const [settings, setSettings] = useState<TradingSettings>({
@@ -25,6 +25,7 @@ const Settings: React.FC = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [saveSuccess, setSaveSuccess] = useState(false);
+    const [isSimulating, setIsSimulating] = useState(false);
 
     const fetchSettings = useCallback(async () => {
         try {
@@ -81,19 +82,100 @@ const Settings: React.FC = () => {
         }
     };
 
-    const inputStyle = {
+    const handleSimulateSignal = async (signalType: 'BUY' | 'SELL') => {
+        setIsSimulating(true);
+        try {
+            const response = await fetch('http://127.0.0.1:8000/trades/simulate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ signal_type: signalType })
+            });
+            if (response.ok) {
+                const result = await response.json();
+                alert(`✅ Đã tạo lệnh ${signalType} thành công!\nEntry: $${result.entry_price?.toFixed(2) || 'N/A'}`);
+            } else {
+                const err = await response.json();
+                alert(`❌ Lỗi: ${err.detail || 'Không thể tạo lệnh'}`);
+            }
+        } catch (err) {
+            setError('Không thể simulate signal');
+        } finally {
+            setIsSimulating(false);
+        }
+    };
+
+    // Styles
+    const containerStyle: React.CSSProperties = {
+        backgroundColor: THEME.bg.secondary,
+        border: `1px solid ${THEME.border.primary}`,
+        borderRadius: '8px',
+        padding: '16px',
+    };
+
+    const sectionStyle: React.CSSProperties = {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px',
+    };
+
+    const headerStyle: React.CSSProperties = {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingBottom: '12px',
+        borderBottom: `1px solid ${THEME.border.primary}`,
+        marginBottom: '16px',
+    };
+
+    const inputStyle: React.CSSProperties = {
+        width: '100%',
         backgroundColor: THEME.bg.vessel,
         border: `1px solid ${THEME.border.input}`,
         color: THEME.text.primary,
+        borderRadius: '4px',
+        padding: '8px 12px',
+        fontSize: '14px',
+        outline: 'none',
     };
+
+    const labelStyle: React.CSSProperties = {
+        display: 'block',
+        fontSize: '12px',
+        color: THEME.text.tertiary,
+        marginBottom: '4px',
+    };
+
+    const gridStyle: React.CSSProperties = {
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: '16px',
+    };
+
+    const cardStyle: React.CSSProperties = {
+        backgroundColor: THEME.bg.vessel,
+        borderRadius: '4px',
+        padding: '8px',
+    };
+
+    const buttonStyle = (bg: string, color: string): React.CSSProperties => ({
+        padding: '8px 16px',
+        fontSize: '12px',
+        fontWeight: 700,
+        borderRadius: '4px',
+        border: 'none',
+        cursor: 'pointer',
+        backgroundColor: bg,
+        color: color,
+        transition: 'opacity 0.2s',
+    });
 
     if (isLoading) {
         return (
-            <div className="rounded-lg p-4" style={{ backgroundColor: THEME.bg.secondary, border: `1px solid ${THEME.border.primary}` }}>
-                <div className="animate-pulse space-y-4">
-                    <div className="h-4 rounded w-1/3" style={{ backgroundColor: THEME.bg.vessel }}></div>
+            <div style={containerStyle}>
+                <div style={{ ...sectionStyle, gap: '16px' }}>
+                    <div style={{ height: '16px', backgroundColor: THEME.bg.vessel, borderRadius: '4px', width: '33%' }}></div>
                     {[...Array(4)].map((_, i) => (
-                        <div key={i} className="h-10 rounded" style={{ backgroundColor: THEME.bg.vessel }}></div>
+                        <div key={i} style={{ height: '40px', backgroundColor: THEME.bg.vessel, borderRadius: '4px' }}></div>
                     ))}
                 </div>
             </div>
@@ -101,22 +183,22 @@ const Settings: React.FC = () => {
     }
 
     return (
-        <div className="rounded-lg p-4 space-y-4" style={{ backgroundColor: THEME.bg.secondary, border: `1px solid ${THEME.border.primary}` }}>
+        <div style={containerStyle}>
             {/* Header */}
-            <div className="flex justify-between items-center pb-3" style={{ borderBottom: `1px solid ${THEME.border.primary}` }}>
-                <h2 className="text-lg font-bold" style={{ color: THEME.text.primary }}>Cài đặt</h2>
+            <div style={headerStyle}>
+                <h2 style={{ fontSize: '18px', fontWeight: 700, color: THEME.text.primary, margin: 0 }}>Cài đặt</h2>
                 {saveSuccess && (
-                    <span className="text-xs animate-pulse" style={{ color: THEME.status.buy }}>✓ Đã lưu</span>
+                    <span style={{ fontSize: '12px', color: THEME.status.buy }}>✓ Đã lưu</span>
                 )}
             </div>
 
             {/* Risk Management */}
-            <div className="space-y-3">
-                <h3 className="text-sm font-semibold" style={{ color: THEME.text.secondary }}>Quản lý rủi ro</h3>
+            <div style={sectionStyle}>
+                <h3 style={{ fontSize: '14px', fontWeight: 600, color: THEME.text.secondary, margin: 0 }}>Quản lý rủi ro</h3>
                 
-                <div className="grid grid-cols-2 gap-4">
+                <div style={gridStyle}>
                     <div>
-                        <label className="block text-xs mb-1" style={{ color: THEME.text.tertiary }}>Rủi ro mỗi lệnh (%)</label>
+                        <label style={labelStyle}>Rủi ro mỗi lệnh (%)</label>
                         <input
                             type="number"
                             min="0.1"
@@ -124,12 +206,11 @@ const Settings: React.FC = () => {
                             step="0.1"
                             value={settings.risk_percent}
                             onChange={(e) => setSettings(s => ({ ...s, risk_percent: parseFloat(e.target.value) || 0 }))}
-                            className="w-full rounded px-3 py-2 text-sm focus:outline-none"
                             style={{ ...inputStyle, borderColor: THEME.status.info }}
                         />
                     </div>
                     <div>
-                        <label className="block text-xs mb-1" style={{ color: THEME.text.tertiary }}>Tỷ lệ R:R</label>
+                        <label style={labelStyle}>Tỷ lệ R:R</label>
                         <input
                             type="number"
                             min="0.5"
@@ -137,31 +218,28 @@ const Settings: React.FC = () => {
                             step="0.1"
                             value={settings.rr_ratio}
                             onChange={(e) => setSettings(s => ({ ...s, rr_ratio: parseFloat(e.target.value) || 0 }))}
-                            className="w-full rounded px-3 py-2 text-sm focus:outline-none"
                             style={{ ...inputStyle, borderColor: THEME.status.info }}
                         />
                     </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div style={gridStyle}>
                     <div>
-                        <label className="block text-xs mb-1" style={{ color: THEME.text.tertiary }}>Số vị thế tối đa</label>
+                        <label style={labelStyle}>Số vị thế tối đa</label>
                         <input
                             type="number"
                             min="1"
                             max="10"
                             value={settings.max_positions}
                             onChange={(e) => setSettings(s => ({ ...s, max_positions: parseInt(e.target.value) || 1 }))}
-                            className="w-full rounded px-3 py-2 text-sm focus:outline-none"
                             style={inputStyle}
                         />
                     </div>
                     <div>
-                        <label className="block text-xs mb-1" style={{ color: THEME.text.tertiary }}>Đòn bẩy</label>
+                        <label style={labelStyle}>Đòn bẩy</label>
                         <select
                             value={settings.leverage}
                             onChange={(e) => setSettings(s => ({ ...s, leverage: parseInt(e.target.value) }))}
-                            className="w-full rounded px-3 py-2 text-sm focus:outline-none"
                             style={inputStyle}
                         >
                             <option value={1}>1x</option>
@@ -173,62 +251,112 @@ const Settings: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <input
                         type="checkbox"
                         id="autoExecute"
                         checked={settings.auto_execute}
                         onChange={(e) => setSettings(s => ({ ...s, auto_execute: e.target.checked }))}
-                        className="w-4 h-4 rounded"
-                        style={{ accentColor: THEME.accent.yellow }}
+                        style={{ width: '16px', height: '16px', accentColor: THEME.accent.yellow }}
                     />
-                    <label htmlFor="autoExecute" className="text-sm" style={{ color: THEME.text.secondary }}>
+                    <label htmlFor="autoExecute" style={{ fontSize: '14px', color: THEME.text.secondary }}>
                         Tự động thực hiện tín hiệu
                     </label>
                 </div>
             </div>
 
-            {/* Strategy Parameters (Read-only) */}
-            <div className="space-y-3 pt-3" style={{ borderTop: `1px solid ${THEME.border.primary}` }}>
-                <h3 className="text-sm font-semibold" style={{ color: THEME.text.secondary }}>Tham số chiến lược</h3>
+            {/* Strategy Parameters */}
+            <div style={{ ...sectionStyle, marginTop: '16px', paddingTop: '16px', borderTop: `1px solid ${THEME.border.primary}` }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 600, color: THEME.text.secondary, margin: 0 }}>Tham số chiến lược</h3>
                 
-                <div className="grid grid-cols-3 gap-3 text-xs">
-                    <div className="rounded p-2" style={{ backgroundColor: THEME.bg.vessel }}>
-                        <div style={{ color: THEME.text.tertiary }}>VWAP</div>
-                        <div className="font-mono" style={{ color: THEME.accent.yellow }}>Period: 14</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                    <div style={cardStyle}>
+                        <div style={{ fontSize: '12px', color: THEME.text.tertiary }}>VWAP</div>
+                        <div style={{ fontFamily: 'monospace', color: THEME.accent.yellow }}>Period: 14</div>
                     </div>
-                    <div className="rounded p-2" style={{ backgroundColor: THEME.bg.vessel }}>
-                        <div style={{ color: THEME.text.tertiary }}>Bollinger Bands</div>
-                        <div className="font-mono" style={{ color: THEME.status.info }}>20, 2σ</div>
+                    <div style={cardStyle}>
+                        <div style={{ fontSize: '12px', color: THEME.text.tertiary }}>Bollinger Bands</div>
+                        <div style={{ fontFamily: 'monospace', color: THEME.status.info }}>20, 2σ</div>
                     </div>
-                    <div className="rounded p-2" style={{ backgroundColor: THEME.bg.vessel }}>
-                        <div style={{ color: THEME.text.tertiary }}>StochRSI</div>
-                        <div className="font-mono" style={{ color: THEME.status.purple }}>14, 3, 3</div>
+                    <div style={cardStyle}>
+                        <div style={{ fontSize: '12px', color: THEME.text.tertiary }}>StochRSI</div>
+                        <div style={{ fontFamily: 'monospace', color: THEME.status.purple }}>14, 3, 3</div>
                     </div>
                 </div>
             </div>
 
             {/* Error Message */}
             {error && (
-                <div className="text-xs rounded p-2" style={{ backgroundColor: THEME.alpha.sellBg, color: THEME.status.sell }}>
+                <div style={{ 
+                    marginTop: '16px', 
+                    padding: '8px', 
+                    borderRadius: '4px', 
+                    backgroundColor: THEME.alpha.sellBg, 
+                    color: THEME.status.sell,
+                    fontSize: '12px'
+                }}>
                     {error}
                 </div>
             )}
 
+            {/* Debug/Test Actions */}
+            <div style={{ ...sectionStyle, marginTop: '16px', paddingTop: '16px', borderTop: `1px solid ${THEME.border.primary}` }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 600, color: THEME.text.secondary, margin: 0 }}>
+                    🔧 Debug / Test
+                </h3>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                        onClick={() => handleSimulateSignal('BUY')}
+                        disabled={isSimulating}
+                        style={{ 
+                            ...buttonStyle(THEME.status.buy, '#fff'),
+                            flex: 1,
+                            opacity: isSimulating ? 0.5 : 1,
+                        }}
+                    >
+                        {isSimulating ? '...' : '▲ Test BUY'}
+                    </button>
+                    <button
+                        onClick={() => handleSimulateSignal('SELL')}
+                        disabled={isSimulating}
+                        style={{ 
+                            ...buttonStyle(THEME.status.sell, '#fff'),
+                            flex: 1,
+                            opacity: isSimulating ? 0.5 : 1,
+                        }}
+                    >
+                        {isSimulating ? '...' : '▼ Test SELL'}
+                    </button>
+                </div>
+                <p style={{ fontSize: '12px', color: THEME.text.tertiary, margin: 0 }}>
+                    Giả lập tín hiệu để test luồng đặt lệnh → Database → Hiển thị
+                </p>
+            </div>
+
             {/* Actions */}
-            <div className="flex justify-between pt-3" style={{ borderTop: `1px solid ${THEME.border.primary}` }}>
+            <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                marginTop: '16px', 
+                paddingTop: '16px', 
+                borderTop: `1px solid ${THEME.border.primary}` 
+            }}>
                 <button
                     onClick={handleReset}
-                    className="px-4 py-2 text-xs rounded transition-colors hover:opacity-80"
-                    style={{ backgroundColor: THEME.alpha.sellBg, color: THEME.status.sell, border: `1px solid ${THEME.status.sell}` }}
+                    style={{ 
+                        ...buttonStyle(THEME.alpha.sellBg, THEME.status.sell),
+                        border: `1px solid ${THEME.status.sell}`,
+                    }}
                 >
                     Reset tài khoản
                 </button>
                 <button
                     onClick={handleSave}
                     disabled={isSaving}
-                    className="px-4 py-2 text-xs rounded transition-colors hover:opacity-80 disabled:opacity-50"
-                    style={{ backgroundColor: THEME.accent.yellow, color: '#000' }}
+                    style={{ 
+                        ...buttonStyle(THEME.accent.yellow, '#000'),
+                        opacity: isSaving ? 0.5 : 1,
+                    }}
                 >
                     {isSaving ? 'Đang lưu...' : 'Lưu cài đặt'}
                 </button>
