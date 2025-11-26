@@ -2,34 +2,41 @@
 RealtimeService - Application Layer
 
 Orchestrates real-time data flow and coordinates all components.
+
+NOTE: This service uses Dependency Injection - all infrastructure
+dependencies are injected via constructor, not created internally.
 """
 
 import asyncio
 import logging
 import pandas as pd
-from typing import Optional, Dict, List, Callable
+from typing import Optional, Dict, List, Callable, TYPE_CHECKING
 from datetime import datetime
 from collections import deque
 
+# Domain imports (allowed)
 from ...domain.entities.candle import Candle
-from ...infrastructure.websocket import BinanceWebSocketClient
-from ...infrastructure.aggregation import DataAggregator
-from ...infrastructure.api.binance_rest_client import BinanceRestClient
+from ...domain.interfaces import (
+    IWebSocketClient,
+    IRestClient,
+    IDataAggregator,
+    IIndicatorCalculator,
+    IVWAPCalculator,
+    IBollingerCalculator,
+    IStochRSICalculator,
+    IADXCalculator,
+    IATRCalculator,
+    IVolumeSpikeDetector,
+)
+
+# Application imports (allowed)
 from ..analysis import VolumeAnalyzer, RSIMonitor
 from ..signals import SignalGenerator, TradingSignal
-from ...infrastructure.indicators.talib_calculator import TALibCalculator
-from ...infrastructure.indicators.vwap_calculator import VWAPCalculator
-from ...infrastructure.indicators.bollinger_calculator import BollingerCalculator
-from ...infrastructure.indicators.stoch_rsi_calculator import StochRSICalculator
 from .entry_price_calculator import EntryPriceCalculator
 from .tp_calculator import TPCalculator
 from .stop_loss_calculator import StopLossCalculator
 from .confidence_calculator import ConfidenceCalculator
 from .smart_entry_calculator import SmartEntryCalculator
-from ...infrastructure.indicators.volume_spike_detector import VolumeSpikeDetector
-from ...infrastructure.indicators.adx_calculator import ADXCalculator
-from ...infrastructure.indicators.adx_calculator import ADXCalculator
-from ...infrastructure.indicators.atr_calculator import ATRCalculator
 from .paper_trading_service import PaperTradingService
 
 
@@ -52,59 +59,74 @@ class RealtimeService:
         self,
         symbol: str = 'btcusdt',
         interval: str = '1m',
-        buffer_size: int = 2000,  # Increased to 2000 for full-day VWAP calculation
-        paper_service: Optional[PaperTradingService] = None
+        buffer_size: int = 2000,
+        paper_service: Optional[PaperTradingService] = None,
+        # Injected dependencies (interfaces)
+        websocket_client: Optional[IWebSocketClient] = None,
+        rest_client: Optional[IRestClient] = None,
+        aggregator: Optional[IDataAggregator] = None,
+        talib_calculator: Optional[IIndicatorCalculator] = None,
+        vwap_calculator: Optional[IVWAPCalculator] = None,
+        bollinger_calculator: Optional[IBollingerCalculator] = None,
+        stoch_rsi_calculator: Optional[IStochRSICalculator] = None,
+        adx_calculator: Optional[IADXCalculator] = None,
+        atr_calculator: Optional[IATRCalculator] = None,
+        volume_spike_detector: Optional[IVolumeSpikeDetector] = None,
+        signal_generator: Optional[SignalGenerator] = None,
     ):
         """
-        Initialize real-time service.
+        Initialize real-time service with dependency injection.
         
         Args:
             symbol: Trading pair symbol (default: 'btcusdt')
             interval: WebSocket interval (default: '1m')
             buffer_size: Size of candle buffers (default: 2000)
+            paper_service: Paper trading service (optional)
+            
+        Injected Dependencies (use DI container to provide these):
+            websocket_client: WebSocket client implementation
+            rest_client: REST API client implementation
+            aggregator: Data aggregator implementation
+            talib_calculator: Technical indicator calculator
+            vwap_calculator: VWAP calculator
+            bollinger_calculator: Bollinger Bands calculator
+            stoch_rsi_calculator: Stochastic RSI calculator
+            adx_calculator: ADX calculator
+            atr_calculator: ATR calculator
+            volume_spike_detector: Volume spike detector
+            signal_generator: Signal generator (pre-configured)
         """
         self.symbol = symbol
         self.interval = interval
         self.buffer_size = buffer_size
         self.paper_service = paper_service
         
-        # Components
-        self.websocket_client = BinanceWebSocketClient()
-        self.rest_client = BinanceRestClient()
-        self.aggregator = DataAggregator(buffer_size=buffer_size)
+        # Store injected dependencies
+        # If not provided, they will be created by DI container
+        self.websocket_client = websocket_client
+        self.rest_client = rest_client
+        self.aggregator = aggregator
         self.volume_analyzer = VolumeAnalyzer(ma_period=20)
         self.rsi_monitor = RSIMonitor(period=6)
         
-        # Initialize calculators (Dependency Injection Root)
-        self.talib_calculator = TALibCalculator()
-        self.vwap_calculator = VWAPCalculator()
-        self.bollinger_calculator = BollingerCalculator()
-        self.stoch_rsi_calculator = StochRSICalculator()
+        # Store calculator references (injected)
+        self.talib_calculator = talib_calculator
+        self.vwap_calculator = vwap_calculator
+        self.bollinger_calculator = bollinger_calculator
+        self.stoch_rsi_calculator = stoch_rsi_calculator
+        self.adx_calculator = adx_calculator
+        self.atr_calculator = atr_calculator
+        self.volume_spike_detector = volume_spike_detector
+        
+        # Application-layer calculators (created here, they're in Application layer)
         self.entry_calculator = EntryPriceCalculator()
         self.tp_calculator = TPCalculator()
         self.stop_loss_calculator = StopLossCalculator()
         self.confidence_calculator = ConfidenceCalculator()
         self.smart_entry_calculator = SmartEntryCalculator()
-        self.volume_spike_detector = VolumeSpikeDetector()
-        self.adx_calculator = ADXCalculator()
-        self.atr_calculator = ATRCalculator()
         
-        self.signal_generator = SignalGenerator(
-            # volume_analyzer and rsi_monitor are no longer used by SignalGenerator
-            volume_spike_detector=self.volume_spike_detector,
-            adx_calculator=self.adx_calculator,
-            atr_calculator=self.atr_calculator,
-            talib_calculator=self.talib_calculator,
-            # entry_calculator is replaced by smart_entry_calculator
-            tp_calculator=self.tp_calculator,
-            stop_loss_calculator=self.stop_loss_calculator,
-            confidence_calculator=self.confidence_calculator,
-            vwap_calculator=self.vwap_calculator,
-            bollinger_calculator=self.bollinger_calculator,
-            stoch_rsi_calculator=self.stoch_rsi_calculator,
-            smart_entry_calculator=self.smart_entry_calculator,
-            account_size=10000.0  # Default account size for dashboard
-        )
+        # Signal generator (injected or will be set later)
+        self.signal_generator = signal_generator
         
         # Data storage (in-memory cache)
         self._latest_1m: Optional[Candle] = None

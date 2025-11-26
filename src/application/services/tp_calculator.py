@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from ...domain.entities.candle import Candle
 from ...domain.entities.enhanced_signal import TPLevels
-from ...infrastructure.indicators.swing_point_detector import SwingPointDetector
+from ...domain.interfaces import ISwingPointDetector
 
 
 @dataclass
@@ -59,7 +59,7 @@ class TPCalculator:
         self,
         min_risk_reward: float = 1.5,
         tp3_extension_pct: float = 0.015,  # 1.5%
-        swing_lookback: int = 5
+        swing_detector: Optional[ISwingPointDetector] = None
     ):
         """
         Initialize TP calculator.
@@ -67,7 +67,7 @@ class TPCalculator:
         Args:
             min_risk_reward: Minimum risk-reward ratio for TP1 (default: 1.5)
             tp3_extension_pct: Extension percentage for TP3 beyond TP2 (default: 0.015 = 1.5%)
-            swing_lookback: Lookback period for swing detection (default: 5)
+            swing_detector: Swing point detector (injected)
         """
         if min_risk_reward < 1.0:
             raise ValueError("Minimum risk-reward ratio must be >= 1.0")
@@ -77,7 +77,7 @@ class TPCalculator:
         
         self.min_risk_reward = min_risk_reward
         self.tp3_extension_pct = tp3_extension_pct
-        self.swing_detector = SwingPointDetector(lookback=swing_lookback)
+        self.swing_detector = swing_detector  # Injected dependency
         self.logger = logging.getLogger(__name__)
         
         self.logger.info(

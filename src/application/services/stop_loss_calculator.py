@@ -9,7 +9,7 @@ from typing import Optional, List
 from dataclasses import dataclass
 
 from ...domain.entities.candle import Candle
-from ...infrastructure.indicators.swing_point_detector import SwingPointDetector
+from ...domain.interfaces import ISwingPointDetector
 
 
 @dataclass
@@ -70,8 +70,8 @@ class StopLossCalculator:
         self,
         max_risk_pct: float = 0.01,  # 1%
         min_distance_pct: float = 0.003,  # 0.3%
-        swing_lookback: int = 5,
-        stop_buffer_pct: float = 0.001  # 0.1% buffer below/above swing
+        stop_buffer_pct: float = 0.001,  # 0.1% buffer below/above swing
+        swing_detector: Optional[ISwingPointDetector] = None
     ):
         """
         Initialize stop loss calculator.
@@ -79,8 +79,8 @@ class StopLossCalculator:
         Args:
             max_risk_pct: Maximum risk per trade (default: 0.01 = 1%)
             min_distance_pct: Minimum distance from entry (default: 0.003 = 0.3%)
-            swing_lookback: Lookback period for swing detection (default: 5)
             stop_buffer_pct: Buffer below/above swing point (default: 0.001 = 0.1%)
+            swing_detector: Swing point detector (injected)
         """
         if max_risk_pct <= 0 or max_risk_pct > 0.05:
             raise ValueError("Max risk must be between 0 and 0.05 (5%)")
@@ -91,7 +91,7 @@ class StopLossCalculator:
         self.max_risk_pct = max_risk_pct
         self.min_distance_pct = min_distance_pct
         self.stop_buffer_pct = stop_buffer_pct
-        self.swing_detector = SwingPointDetector(lookback=swing_lookback)
+        self.swing_detector = swing_detector  # Injected dependency
         self.logger = logging.getLogger(__name__)
         
         self.logger.info(

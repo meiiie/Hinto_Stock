@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\application\services\entry_price_calculator.py
+# hypothesis_version: 6.148.2
+
+[0.001, 0.005, 0.01, 0.02, 'BUY', 'SELL']

@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\application\analysis\rsi_monitor.py
+# hypothesis_version: 6.148.2
+
+[20.0, 35.0, 65.0, 80.0, '#26C6DA', '#66BB6A', '#757575', '#EF5350', '#FF9800', '#FFC107', 'Neutral', 'Overbought', 'Oversold', 'Strong Overbought', 'Strong Oversold', 'Unknown', 'alerts', 'close', 'critical', 'high', 'is_neutral', 'is_overbought', 'is_oversold', 'low', 'neutral', 'open', 'overbought', 'oversold', 'rsi', 'rsi_6', 'strong_overbought', 'strong_oversold', 'volume', 'warning', 'zone']

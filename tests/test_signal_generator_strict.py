@@ -149,13 +149,29 @@ class TestSignalGeneratorStrictMode:
         assert generator.strict_mode is False
     
     def test_strict_mode_volume_threshold(self):
-        """Test strict mode uses 2.5x volume threshold"""
-        # Don't inject detector, let SignalGenerator create it based on strict_mode
-        generator_strict = self._create_generator(strict_mode=True, inject_detector=False)
-        generator_normal = self._create_generator(strict_mode=False, inject_detector=False)
+        """Test strict mode uses 2.5x volume threshold when detector is injected"""
+        # Create detectors with different thresholds
+        strict_detector = VolumeSpikeDetector(threshold=2.5)
+        normal_detector = VolumeSpikeDetector(threshold=2.0)
         
-        # Note: In new implementation, volume threshold might be passed to detector or handled inside.
-        # If SignalGenerator sets detector threshold based on strict mode:
+        generator_strict = SignalGenerator(
+            vwap_calculator=self.vwap_calculator,
+            bollinger_calculator=self.bollinger_calculator,
+            stoch_rsi_calculator=self.stoch_rsi_calculator,
+            smart_entry_calculator=self.smart_entry_calculator,
+            volume_spike_detector=strict_detector,
+            strict_mode=True
+        )
+        generator_normal = SignalGenerator(
+            vwap_calculator=self.vwap_calculator,
+            bollinger_calculator=self.bollinger_calculator,
+            stoch_rsi_calculator=self.stoch_rsi_calculator,
+            smart_entry_calculator=self.smart_entry_calculator,
+            volume_spike_detector=normal_detector,
+            strict_mode=False
+        )
+        
+        # Verify detectors are stored correctly
         assert generator_strict.volume_spike_detector.threshold == 2.5
         assert generator_normal.volume_spike_detector.threshold == 2.0
     

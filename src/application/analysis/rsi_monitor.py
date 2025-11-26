@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ...domain.entities.candle import Candle
-from ...infrastructure.indicators.talib_calculator import TALibCalculator
+from ...domain.interfaces import IIndicatorCalculator
 
 
 class RSIZone(Enum):
@@ -58,7 +58,8 @@ class RSIMonitor:
         oversold_threshold: float = 35.0,
         overbought_threshold: float = 65.0,
         strong_oversold_threshold: float = 20.0,
-        strong_overbought_threshold: float = 80.0
+        strong_overbought_threshold: float = 80.0,
+        calculator: Optional[IIndicatorCalculator] = None
     ):
         """
         Initialize RSI monitor with professional short-term thresholds.
@@ -69,6 +70,7 @@ class RSIMonitor:
             overbought_threshold: Overbought warning zone (default: 65)
             strong_oversold_threshold: Strong oversold threshold (default: 20)
             strong_overbought_threshold: Strong overbought threshold (default: 80)
+            calculator: Indicator calculator (injected)
         
         Professional Thresholds:
         - Strong Oversold: < 20 (Critical buy signal)
@@ -87,7 +89,7 @@ class RSIMonitor:
         self.neutral_bottom = oversold_threshold  # 35
         self.neutral_top = overbought_threshold   # 65
         
-        self.calculator = TALibCalculator()
+        self.calculator = calculator  # Injected dependency
         self.logger = logging.getLogger(__name__)
         
         self.logger.info(

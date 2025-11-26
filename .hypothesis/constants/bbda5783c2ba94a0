@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\domain\interfaces\i_websocket_client.py
+# hypothesis_version: 6.148.2
+
+['connected', 'connecting', 'disconnected', 'error', 'reconnecting']

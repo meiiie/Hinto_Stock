@@ -6,6 +6,11 @@ import pytest
 from datetime import datetime, timedelta
 from src.domain.entities.candle import Candle
 from src.application.analysis import RSIMonitor, RSIZone
+from src.infrastructure.indicators.talib_calculator import TALibCalculator
+
+
+# Create shared calculator for tests
+_calculator = TALibCalculator()
 
 
 def create_candle(timestamp: datetime, close: float) -> Candle:
@@ -22,7 +27,7 @@ def create_candle(timestamp: datetime, close: float) -> Candle:
 
 def test_rsi_monitor_initialization():
     """Test monitor initializes with correct defaults"""
-    monitor = RSIMonitor()
+    monitor = RSIMonitor(calculator=_calculator)
     
     assert monitor.period == 6
     assert monitor.oversold_threshold == 35.0
@@ -36,7 +41,8 @@ def test_rsi_monitor_custom_thresholds():
     monitor = RSIMonitor(
         period=14,
         oversold_threshold=25.0,
-        overbought_threshold=75.0
+        overbought_threshold=75.0,
+        calculator=_calculator
     )
     
     assert monitor.period == 14
@@ -46,7 +52,7 @@ def test_rsi_monitor_custom_thresholds():
 
 def test_insufficient_data():
     """Test handling of insufficient data"""
-    monitor = RSIMonitor(period=6)
+    monitor = RSIMonitor(period=6, calculator=_calculator)
     
     # Only 5 candles (need 7 for RSI(6))
     candles = [
@@ -60,7 +66,7 @@ def test_insufficient_data():
 
 def test_rsi_zone_detection():
     """Test RSI zone classification"""
-    monitor = RSIMonitor()
+    monitor = RSIMonitor(calculator=_calculator)
     
     # Strong oversold
     assert monitor.get_rsi_zone(15.0) == RSIZone.STRONG_OVERSOLD
@@ -80,7 +86,7 @@ def test_rsi_zone_detection():
 
 def test_alert_generation_overbought():
     """Test alert generation for overbought conditions"""
-    monitor = RSIMonitor()
+    monitor = RSIMonitor(calculator=_calculator)
     
     # Overbought
     alerts = monitor.generate_alerts(75.0)
@@ -99,7 +105,7 @@ def test_alert_generation_overbought():
 
 def test_alert_generation_oversold():
     """Test alert generation for oversold conditions"""
-    monitor = RSIMonitor()
+    monitor = RSIMonitor(calculator=_calculator)
     
     # Oversold
     alerts = monitor.generate_alerts(25.0)
@@ -118,7 +124,7 @@ def test_alert_generation_oversold():
 
 def test_alert_generation_neutral():
     """Test no alerts for neutral zone"""
-    monitor = RSIMonitor()
+    monitor = RSIMonitor(calculator=_calculator)
     
     alerts = monitor.generate_alerts(50.0)
     assert len(alerts) == 0
@@ -126,7 +132,7 @@ def test_alert_generation_neutral():
 
 def test_rsi_calculation_with_trend():
     """Test RSI calculation with trending prices"""
-    monitor = RSIMonitor(period=6)
+    monitor = RSIMonitor(period=6, calculator=_calculator)
     
     # Create uptrend (prices increasing)
     base_time = datetime.now()
@@ -144,7 +150,7 @@ def test_rsi_calculation_with_trend():
 
 def test_analyze_complete():
     """Test complete analysis"""
-    monitor = RSIMonitor(period=6)
+    monitor = RSIMonitor(period=6, calculator=_calculator)
     
     # Create candles with strong uptrend
     base_time = datetime.now()
@@ -182,7 +188,7 @@ def test_analyze_insufficient_data():
 
 def test_get_zone_color():
     """Test zone color mapping"""
-    monitor = RSIMonitor()
+    monitor = RSIMonitor(calculator=_calculator)
     
     colors = {
         RSIZone.STRONG_OVERSOLD: '#26C6DA',
@@ -198,7 +204,7 @@ def test_get_zone_color():
 
 def test_get_zone_label():
     """Test zone label mapping"""
-    monitor = RSIMonitor()
+    monitor = RSIMonitor(calculator=_calculator)
     
     labels = {
         RSIZone.STRONG_OVERSOLD: 'Strong Oversold',
@@ -214,7 +220,7 @@ def test_get_zone_label():
 
 def test_boundary_conditions():
     """Test RSI zone boundaries"""
-    monitor = RSIMonitor()
+    monitor = RSIMonitor(calculator=_calculator)
     
     # Test exact boundaries
     assert monitor.get_rsi_zone(20.0) == RSIZone.OVERSOLD  # Exactly at threshold

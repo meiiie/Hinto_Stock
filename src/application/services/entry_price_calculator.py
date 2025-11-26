@@ -9,7 +9,7 @@ from typing import Optional, List
 from dataclasses import dataclass
 
 from ...domain.entities.candle import Candle
-from ...infrastructure.indicators.swing_point_detector import SwingPointDetector
+from ...domain.interfaces import ISwingPointDetector
 
 
 @dataclass
@@ -54,7 +54,7 @@ class EntryPriceCalculator:
         self,
         offset_pct: float = 0.001,  # 0.1%
         max_ema_distance_pct: float = 0.005,  # 0.5%
-        swing_lookback: int = 5
+        swing_detector: Optional[ISwingPointDetector] = None
     ):
         """
         Initialize entry price calculator.
@@ -62,7 +62,7 @@ class EntryPriceCalculator:
         Args:
             offset_pct: Offset percentage for entry (default: 0.001 = 0.1%)
             max_ema_distance_pct: Max distance from EMA(7) (default: 0.005 = 0.5%)
-            swing_lookback: Lookback period for swing detection (default: 5)
+            swing_detector: Swing point detector (injected)
         """
         if offset_pct < 0 or offset_pct > 0.01:
             raise ValueError("Offset percentage must be between 0 and 0.01 (1%)")
@@ -72,7 +72,7 @@ class EntryPriceCalculator:
         
         self.offset_pct = offset_pct
         self.max_ema_distance_pct = max_ema_distance_pct
-        self.swing_detector = SwingPointDetector(lookback=swing_lookback)
+        self.swing_detector = swing_detector  # Injected dependency
         self.logger = logging.getLogger(__name__)
         
         self.logger.info(

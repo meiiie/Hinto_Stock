@@ -2,29 +2,32 @@
 SignalGenerator - Application Layer
 
 Generates trading signals by combining multiple technical indicators.
+
+NOTE: Uses Dependency Injection - all infrastructure dependencies
+are injected via constructor using domain interfaces.
 """
 
 import logging
 from datetime import datetime
 import pandas as pd
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import Enum
 
+# Domain imports (allowed)
 from ...domain.entities.candle import Candle
 from ...domain.entities.trading_signal import TradingSignal, SignalType, ConfidenceLevel
-from ...infrastructure.indicators.volume_spike_detector import (
-    VolumeSpikeDetector,
-    VolumeSpikeResult,
-    SpikeIntensity
+from ...domain.interfaces import (
+    IVolumeSpikeDetector,
+    IATRCalculator,
+    IADXCalculator,
+    IIndicatorCalculator,
+    IVWAPCalculator,
+    IBollingerCalculator,
+    IStochRSICalculator,
 )
-from ...infrastructure.indicators.atr_calculator import ATRCalculator
-from ...infrastructure.indicators.adx_calculator import ADXCalculator
-from ...infrastructure.indicators.talib_calculator import TALibCalculator
-# New Trend Pullback indicators
-from ...infrastructure.indicators.vwap_calculator import VWAPCalculator
-from ...infrastructure.indicators.bollinger_calculator import BollingerCalculator
-from ...infrastructure.indicators.stoch_rsi_calculator import StochRSICalculator
+
+# Application imports (allowed)
 from ..services.tp_calculator import TPCalculator
 from ..services.stop_loss_calculator import StopLossCalculator
 from ..services.confidence_calculator import ConfidenceCalculator
@@ -43,16 +46,16 @@ class SignalGenerator:
     
     def __init__(
         self,
-        # Required dependencies (DI)
-        vwap_calculator: VWAPCalculator,
-        bollinger_calculator: BollingerCalculator,
-        stoch_rsi_calculator: StochRSICalculator,
+        # Required dependencies (DI) - using interfaces
+        vwap_calculator: IVWAPCalculator,
+        bollinger_calculator: IBollingerCalculator,
+        stoch_rsi_calculator: IStochRSICalculator,
         smart_entry_calculator: SmartEntryCalculator,
-        # Optional dependencies
-        volume_spike_detector: Optional[VolumeSpikeDetector] = None,
-        adx_calculator: Optional[ADXCalculator] = None,
-        atr_calculator: Optional[ATRCalculator] = None,
-        talib_calculator: Optional[TALibCalculator] = None,
+        # Optional dependencies - using interfaces
+        volume_spike_detector: Optional[IVolumeSpikeDetector] = None,
+        adx_calculator: Optional[IADXCalculator] = None,
+        atr_calculator: Optional[IATRCalculator] = None,
+        talib_calculator: Optional[IIndicatorCalculator] = None,
         tp_calculator: Optional[TPCalculator] = None,
         stop_loss_calculator: Optional[StopLossCalculator] = None,
         confidence_calculator: Optional[ConfidenceCalculator] = None,
@@ -62,18 +65,23 @@ class SignalGenerator:
         strict_mode: bool = True
     ):
         """
-        Initialize signal generator.
+        Initialize signal generator with dependency injection.
+        
+        All infrastructure dependencies are injected via constructor.
+        Application-layer services (TPCalculator, etc.) can have defaults.
         """
-        volume_threshold = 2.5 if strict_mode else 2.0
-        self.volume_spike_detector = volume_spike_detector or VolumeSpikeDetector(threshold=volume_threshold)
-        self.adx_calculator = adx_calculator or ADXCalculator(period=14)
-        self.atr_calculator = atr_calculator or ATRCalculator(period=14)
-        self.talib_calculator = talib_calculator or TALibCalculator()
+        # Store injected infrastructure dependencies
+        self.volume_spike_detector = volume_spike_detector
+        self.adx_calculator = adx_calculator
+        self.atr_calculator = atr_calculator
+        self.talib_calculator = talib_calculator
+        
+        # Application-layer services (can have defaults)
         self.tp_calculator = tp_calculator or TPCalculator()
         self.stop_loss_calculator = stop_loss_calculator or StopLossCalculator()
         self.confidence_calculator = confidence_calculator or ConfidenceCalculator()
         
-        # Injected calculators
+        # Required injected calculators
         self.vwap_calculator = vwap_calculator
         self.bollinger_calculator = bollinger_calculator
         self.stoch_rsi_calculator = stoch_rsi_calculator
@@ -391,7 +399,7 @@ class SignalGenerator:
         vwap_result: Optional[Any],
         bb_result: Optional[Any],
         stoch_result: Optional[Any],
-        volume_spike_result: Optional[VolumeSpikeResult],
+        volume_spike_result: Optional[Any],  # VolumeSpikeResult
         indicators: Dict[str, Any] = None
     ) -> Optional[TradingSignal]:
         """
@@ -474,7 +482,7 @@ class SignalGenerator:
         vwap_result: Optional[Any],
         bb_result: Optional[Any],
         stoch_result: Optional[Any],
-        volume_spike_result: Optional[VolumeSpikeResult],
+        volume_spike_result: Optional[Any],  # VolumeSpikeResult
         indicators: Dict[str, Any] = None
     ) -> Optional[TradingSignal]:
         """

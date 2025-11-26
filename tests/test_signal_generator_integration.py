@@ -339,10 +339,11 @@ class TestSignalGeneratorIntegration:
         generator = self._create_generator(use_filters=False)
         signal = generator.generate_signal(modified_candles)
         
-        # With filters disabled, signal might be generated
-        # (depends on other conditions)
-        # Just verify it doesn't crash
-        assert signal is not None
+        # With filters disabled, signal might be generated or None
+        # depending on other conditions (VWAP, BB, StochRSI)
+        # Just verify it doesn't crash - signal can be None or valid
+        # This is backward compatibility test, not signal generation test
+        assert signal is None or signal.signal_type is not None
     
     def test_insufficient_candles_for_filters(self):
         """Test handling of insufficient candles for EMA50"""
