@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { apiUrl, wsUrl, ENDPOINTS } from '../config/api';
 
 interface MarketData {
     open: number;
@@ -7,6 +8,7 @@ interface MarketData {
     close: number;
     volume: number;
     timestamp: string;
+    time?: number;  // Unix timestamp for chart updates
     change_percent?: number;
     rsi?: number;
     vwap?: number;
@@ -19,6 +21,7 @@ interface MarketData {
 }
 
 interface Signal {
+    id?: string;  // Backend UUID
     type: 'BUY' | 'SELL';
     price: number;
     entry_price: number;
@@ -26,8 +29,9 @@ interface Signal {
     take_profit: number;
     confidence: number;
     risk_reward_ratio: number;
-    timestamp: string;
+    timestamp: string;  // From backend generated_at
     reason?: string;
+    status?: 'generated' | 'pending' | 'executed' | 'expired' | 'rejected';
 }
 
 interface ReconnectState {
@@ -36,9 +40,22 @@ interface ReconnectState {
     nextRetryIn: number;
 }
 
+interface StateChange {
+    from_state: string;
+    to_state: string;
+    reason?: string;
+    timestamp: string;
+    order_id?: string | null;
+    position_id?: string | null;
+    cooldown_remaining?: number;  // candles remaining in cooldown
+}
+
 interface UseMarketDataReturn {
-    data: MarketData | null;
+    data: MarketData | null;      // 1m candle data (realtime)
+    data15m: MarketData | null;   // 15m candle data (from backend aggregation)
+    data1h: MarketData | null;    // 1h candle data (from backend aggregation)
     signal: Signal | null;
+    stateChange: StateChange | null;
     isConnected: boolean;
     error: string | null;
     reconnectState: ReconnectState;
@@ -64,7 +81,10 @@ const calculateBackoffDelay = (retryCount: number): number => {
  */
 export const useMarketData = (symbol: string = 'btcusdt'): UseMarketDataReturn => {
     const [data, setData] = useState<MarketData | null>(null);
+    const [data15m, setData15m] = useState<MarketData | null>(null);  // 15m candle
+    const [data1h, setData1h] = useState<MarketData | null>(null);    // 1h candle
     const [signal, setSignal] = useState<Signal | null>(null);
+    const [stateChange, setStateChange] = useState<StateChange | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [reconnectState, setReconnectState] = useState<ReconnectState>({
@@ -79,6 +99,16 @@ export const useMarketData = (symbol: string = 'btcusdt'): UseMarketDataReturn =
     const isUnmountingRef = useRef(false);
     const retryCountRef = useRef(0);
     const lastUpdateTimeRef = useRef<string | null>(null);
+
+    // SOTA FIX: Track last update time per timeframe for heartbeat monitoring
+    const lastUpdatePerTimeframeRef = useRef<Record<string, number>>({
+        '1m': Date.now(),
+        '15m': Date.now(),
+        '1h': Date.now()
+    });
+
+    // Heartbeat stale threshold (30 seconds)
+    const HEARTBEAT_STALE_MS = 30000;
 
     // Clear all timers
     const clearTimers = useCallback(() => {
@@ -95,12 +125,12 @@ export const useMarketData = (symbol: string = 'btcusdt'): UseMarketDataReturn =
     // Fetch missing candles after reconnect (Data Gap Handling)
     const fetchMissingCandles = useCallback(async () => {
         if (!lastUpdateTimeRef.current) return;
-        
+
         try {
             console.log('Fetching missing candles since:', lastUpdateTimeRef.current);
             // TODO: Implement full data gap filling
             // For now, just log the intent - can be expanded later
-            const response = await fetch(`http://127.0.0.1:8000/market/history?symbol=${symbol}&limit=100`);
+            const response = await fetch(apiUrl(ENDPOINTS.MARKET_HISTORY(symbol, 100)));
             if (response.ok) {
                 const historyData = await response.json();
                 console.log('Fetched history data:', historyData.length, 'candles');
@@ -109,6 +139,46 @@ export const useMarketData = (symbol: string = 'btcusdt'): UseMarketDataReturn =
             console.error('Failed to fetch missing candles:', err);
         }
     }, [symbol]);
+
+    // SOTA FIX: Fallback REST fetch for specific timeframe when WS is quiet
+    const fetchTimeframeCandle = useCallback(async (timeframe: string) => {
+        try {
+            console.log(`🔄 Heartbeat fallback: fetching ${timeframe} candle from REST API`);
+            const response = await fetch(
+                apiUrl(ENDPOINTS.WS_HISTORY('btcusdt', timeframe, 1))
+            );
+            if (response.ok) {
+                const historyData = await response.json();
+                if (historyData && historyData.length > 0) {
+                    const latestCandle = historyData[historyData.length - 1];
+                    const candleData: MarketData = {
+                        open: latestCandle.open || 0,
+                        high: latestCandle.high || 0,
+                        low: latestCandle.low || 0,
+                        close: latestCandle.close || 0,
+                        volume: latestCandle.volume || 0,
+                        timestamp: latestCandle.timestamp || new Date().toISOString(),
+                        time: latestCandle.time || Math.floor(Date.now() / 1000),
+                    };
+
+                    // Update appropriate state based on timeframe
+                    if (timeframe === '1m') {
+                        setData(candleData);
+                    } else if (timeframe === '15m') {
+                        setData15m(candleData);
+                    } else if (timeframe === '1h') {
+                        setData1h(candleData);
+                    }
+
+                    // Update heartbeat timestamp
+                    lastUpdatePerTimeframeRef.current[timeframe] = Date.now();
+                    console.log(`✅ Heartbeat fallback: ${timeframe} candle updated`);
+                }
+            }
+        } catch (err) {
+            console.error(`Failed to fetch ${timeframe} candle:`, err);
+        }
+    }, []);
 
     // Schedule reconnect with exponential backoff
     const scheduleReconnect = useCallback(() => {
@@ -150,10 +220,10 @@ export const useMarketData = (symbol: string = 'btcusdt'): UseMarketDataReturn =
         clearTimers();
 
         try {
-            const wsUrl = `ws://127.0.0.1:8000/ws/stream/${symbol}`;
-            console.log(`Connecting to WebSocket: ${wsUrl}`);
+            const wsAddress = wsUrl(ENDPOINTS.WS_STREAM(symbol));
+            console.log(`Connecting to WebSocket: ${wsAddress}`);
 
-            const ws = new WebSocket(wsUrl);
+            const ws = new WebSocket(wsAddress);
             wsRef.current = ws;
 
             ws.onopen = () => {
@@ -176,18 +246,34 @@ export const useMarketData = (symbol: string = 'btcusdt'): UseMarketDataReturn =
             ws.onmessage = (event) => {
                 try {
                     const parsedData = JSON.parse(event.data);
-                    
+
                     if (parsedData.type === 'signal') {
-                        setSignal(parsedData.signal);
+                        try {
+                            // Defensive: validate signal object exists
+                            if (!parsedData.signal || typeof parsedData.signal !== 'object') {
+                                console.warn('Invalid signal data received:', parsedData);
+                                return;
+                            }
+                            // Normalize signal type to uppercase (backend sends lowercase)
+                            const rawType = parsedData.signal.type || '';
+                            const normalizedSignal = {
+                                ...parsedData.signal,
+                                type: typeof rawType === 'string' ? rawType.toUpperCase() : rawType
+                            };
+                            console.log('📡 Signal received and normalized:', normalizedSignal);
+                            setSignal(normalizedSignal);
+                        } catch (signalErr) {
+                            console.error('Error processing signal:', signalErr, parsedData);
+                        }
                     } else if (parsedData.type === 'candle' || parsedData.type === 'snapshot') {
                         const open = parsedData.open || parsedData.candle?.open || 0;
                         const close = parsedData.close || parsedData.candle?.close || 0;
                         let changePercent = parsedData.change_percent || parsedData.candle?.change_percent;
-                        
+
                         if (changePercent === undefined && open > 0) {
                             changePercent = ((close - open) / open) * 100;
                         }
-                        
+
                         const marketData: MarketData = {
                             open: open,
                             high: parsedData.high || parsedData.candle?.high || 0,
@@ -202,12 +288,61 @@ export const useMarketData = (symbol: string = 'btcusdt'): UseMarketDataReturn =
                         };
                         setData(marketData);
                         lastUpdateTimeRef.current = marketData.timestamp; // Track last update
-                        
-                        if (parsedData.signal) {
-                            setSignal(parsedData.signal);
+                        lastUpdatePerTimeframeRef.current['1m'] = Date.now(); // Heartbeat update
+
+                        if (parsedData.signal && typeof parsedData.signal === 'object') {
+                            try {
+                                // Normalize signal type to uppercase (backend sends lowercase)
+                                const rawType = parsedData.signal.type || '';
+                                const normalizedSignal = {
+                                    ...parsedData.signal,
+                                    type: typeof rawType === 'string' ? rawType.toUpperCase() : rawType
+                                };
+                                console.log('📡 Signal (in candle) received:', normalizedSignal);
+                                setSignal(normalizedSignal);
+                            } catch (signalErr) {
+                                console.error('Error processing embedded signal:', signalErr);
+                            }
                         }
+                    } else if (parsedData.type === 'candle_15m') {
+                        // 15-minute candle from backend aggregation
+                        console.log('📊 15m candle received:', parsedData);
+                        const candleData: MarketData = {
+                            open: parsedData.open || 0,
+                            high: parsedData.high || 0,
+                            low: parsedData.low || 0,
+                            close: parsedData.close || 0,
+                            volume: parsedData.volume || 0,
+                            timestamp: parsedData.timestamp || new Date().toISOString(),
+                            time: parsedData.time || Math.floor(Date.now() / 1000),  // Unix timestamp
+                        };
+                        setData15m(candleData);
+                        lastUpdatePerTimeframeRef.current['15m'] = Date.now(); // Heartbeat update
+                    } else if (parsedData.type === 'candle_1h') {
+                        // 1-hour candle from backend aggregation
+                        console.log('📊 1h candle received:', parsedData);
+                        const candleData: MarketData = {
+                            open: parsedData.open || 0,
+                            high: parsedData.high || 0,
+                            low: parsedData.low || 0,
+                            close: parsedData.close || 0,
+                            volume: parsedData.volume || 0,
+                            timestamp: parsedData.timestamp || new Date().toISOString(),
+                            time: parsedData.time || Math.floor(Date.now() / 1000),  // Unix timestamp
+                        };
+                        setData1h(candleData);
+                        lastUpdatePerTimeframeRef.current['1h'] = Date.now(); // Heartbeat update
                     } else if (parsedData.type === 'pong') {
                         // Ping response - ignore
+                    } else if (parsedData.type === 'state_change') {
+                        // State machine transition event
+                        console.log('🔄 State change received:', parsedData);
+                        setStateChange({
+                            from_state: parsedData.from_state || parsedData.data?.from_state || '',
+                            to_state: parsedData.to_state || parsedData.data?.to_state || '',
+                            reason: parsedData.reason || parsedData.data?.reason,
+                            timestamp: parsedData.timestamp || new Date().toISOString()
+                        });
                     } else {
                         setData(parsedData);
                     }
@@ -267,6 +402,27 @@ export const useMarketData = (symbol: string = 'btcusdt'): UseMarketDataReturn =
         return () => clearInterval(pingInterval);
     }, []);
 
+    // SOTA FIX: Heartbeat monitor - fallback REST fetch when WS is quiet
+    useEffect(() => {
+        const heartbeatInterval = setInterval(() => {
+            const now = Date.now();
+            const timeframes = ['1m', '15m', '1h'] as const;
+
+            for (const tf of timeframes) {
+                const lastUpdate = lastUpdatePerTimeframeRef.current[tf];
+                const timeSinceUpdate = now - lastUpdate;
+
+                // If no update for 30+ seconds and we're connected, fetch from REST
+                if (timeSinceUpdate > HEARTBEAT_STALE_MS && isConnected) {
+                    console.warn(`⚠️ Heartbeat: ${tf} stale (${Math.round(timeSinceUpdate / 1000)}s), triggering fallback fetch`);
+                    fetchTimeframeCandle(tf);
+                }
+            }
+        }, 10000); // Check every 10 seconds
+
+        return () => clearInterval(heartbeatInterval);
+    }, [isConnected, fetchTimeframeCandle]);
+
     useEffect(() => {
         isUnmountingRef.current = false;
         connect();
@@ -280,5 +436,5 @@ export const useMarketData = (symbol: string = 'btcusdt'): UseMarketDataReturn =
         };
     }, [connect, clearTimers]);
 
-    return { data, signal, isConnected, error, reconnectState, reconnectNow };
+    return { data, data15m, data1h, signal, stateChange, isConnected, error, reconnectState, reconnectNow };
 };

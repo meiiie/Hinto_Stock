@@ -1,3 +1,4 @@
+
 """
 SignalGenerator - Application Layer
 
@@ -5,6 +6,9 @@ Generates trading signals by combining multiple technical indicators.
 
 NOTE: Uses Dependency Injection - all infrastructure dependencies
 are injected via constructor using domain interfaces.
+
+Layer 0: Regime Filter (HMM-based regime detection)
+Layer 1: Signal Generation (VWAP + BB + StochRSI + ADX + Volume)
 """
 
 import logging
@@ -26,6 +30,8 @@ from ...domain.interfaces import (
     IBollingerCalculator,
     IStochRSICalculator,
 )
+from ...domain.interfaces.i_regime_detector import IRegimeDetector
+from ...domain.value_objects.regime_result import RegimeType
 
 # Application imports (allowed)
 from ..services.tp_calculator import TPCalculator
@@ -59,10 +65,13 @@ class SignalGenerator:
         tp_calculator: Optional[TPCalculator] = None,
         stop_loss_calculator: Optional[StopLossCalculator] = None,
         confidence_calculator: Optional[ConfidenceCalculator] = None,
+        # NEW: Regime detector for Layer 0 filtering
+        regime_detector: Optional[IRegimeDetector] = None,
         # Config
         account_size: float = 10000.0,
         use_filters: bool = True,
-        strict_mode: bool = True
+        strict_mode: bool = True,
+        use_regime_filter: bool = True  # NEW: Enable regime filter
     ):
         """
         Initialize signal generator with dependency injection.
@@ -87,6 +96,10 @@ class SignalGenerator:
         self.stoch_rsi_calculator = stoch_rsi_calculator
         self.smart_entry_calculator = smart_entry_calculator
         
+        # NEW: Regime detector (Layer 0)
+        self.regime_detector = regime_detector
+        self.use_regime_filter = use_regime_filter
+        
         self.account_size = account_size
         self.use_filters = use_filters
         self.strict_mode = strict_mode
@@ -98,10 +111,14 @@ class SignalGenerator:
         """
         Generate trading signal based on current market conditions.
         
+        Layer 0: Regime Filter - blocks signals in RANGING markets
+        Layer 1: Signal Generation - VWAP + BB + StochRSI + ADX + Volume
+        
         Enhanced with trend and volatility filters:
-        1. Check volatility filter (ADX > 25) - reject choppy market signals
-        2. Calculate ATR for dynamic stop loss and take profit
-        3. Apply stricter signal conditions
+        1. Check regime filter (HMM-based) - block signals in choppy markets
+        2. Check volatility filter (ADX > 25) - reduce confidence in low ADX
+        3. Calculate ATR for dynamic stop loss and take profit
+        4. Apply stricter signal conditions
         
         Args:
             candles: List of Candle entities (chronological order)
@@ -114,6 +131,23 @@ class SignalGenerator:
             return None
         
         try:
+            # === LAYER 0: REGIME FILTER ===
+            regime_result = None
+            if self.use_regime_filter and self.regime_detector:
+                regime_result = self.regime_detector.detect_regime(candles)
+                
+                if regime_result:
+                    self.logger.info(
+                        f"🎯 Regime: {regime_result.regime.value} "
+                        f"(confidence: {regime_result.confidence:.2%})"
+                    )
+                    
+                    # BLOCK signals in RANGING regime
+                    if regime_result.is_ranging:
+                        self.logger.info("🚫 Signal blocked: RANGING market regime")
+                        return None
+            
+            # === LAYER 1: SIGNAL GENERATION ===
             # Get current candle
             current_candle = candles[-1]
             current_price = current_candle.close
@@ -228,7 +262,13 @@ class SignalGenerator:
             )
             
             if buy_signal:
-                return self._enrich_signal(buy_signal, candles, ema_7_current, ema_25_current, atr_result, vwap_result)
+                self.logger.info(f"🟢 BUY signal generated (pre-enrich): price={current_price}")
+                enriched = self._enrich_signal(buy_signal, candles, ema_7_current, ema_25_current, atr_result, vwap_result)
+                if enriched:
+                    self.logger.info(f"✅ BUY signal ENRICHED successfully - ready for execution!")
+                else:
+                    self.logger.warning(f"❌ BUY signal REJECTED during enrichment")
+                return enriched
             
             # Generate sell signal
             sell_signal = self._check_sell_conditions(
@@ -236,13 +276,19 @@ class SignalGenerator:
             )
             
             if sell_signal:
-                return self._enrich_signal(sell_signal, candles, ema_7_current, ema_25_current, atr_result, vwap_result)
+                self.logger.info(f"🔴 SELL signal generated (pre-enrich): price={current_price}")
+                enriched = self._enrich_signal(sell_signal, candles, ema_7_current, ema_25_current, atr_result, vwap_result)
+                if enriched:
+                    self.logger.info(f"✅ SELL signal ENRICHED successfully - ready for execution!")
+                else:
+                    self.logger.warning(f"❌ SELL signal REJECTED during enrichment")
+                return enriched
             
             # No signal - return neutral
             return TradingSignal(
                 signal_type=SignalType.NEUTRAL,
                 confidence=0.0,
-                timestamp=current_candle.timestamp,  # FIX: Use candle timestamp not datetime.now()
+                generated_at=current_candle.timestamp,  # FIX: Use candle timestamp
                 price=current_price,
                 indicators=indicators,
                 reasons=["No clear signal - waiting for better conditions"]
@@ -378,18 +424,31 @@ class SignalGenerator:
         
         # 6. Strict R:R Check (Master Spec)
         # If R:R < 0.8, invalidate the signal (Relaxed from 1.0 per Expert Feedback)
+        rr_ratio = getattr(signal, 'risk_reward_ratio', None)
+        self.logger.info(f"🔍 ENRICH: R:R ratio = {rr_ratio}")
+        
         if hasattr(signal, 'risk_reward_ratio') and signal.risk_reward_ratio < 0.8:
+            self.logger.warning(f"❌ SIGNAL INVALIDATED: R:R {signal.risk_reward_ratio:.2f} < 0.8")
             signal.signal_type = SignalType.NEUTRAL
             signal.reasons.append(f"INVALIDATED: R:R {signal.risk_reward_ratio:.2f} < 0.8 (Strict Filter)")
             return None # Strictly return None for invalidated signals
+        else:
+            self.logger.info(f"✅ R:R check passed: {rr_ratio}")
 
         # 7. Volume Climax Filter (Task B)
         # If volume is too high (> 4.0x), it might be a climax/exhaustion, not a breakout
-        if signal.indicators.get('volume_spike_ratio', 0) > 4.0:
+        vol_ratio = signal.indicators.get('volume_spike_ratio', 0)
+        self.logger.info(f"🔍 ENRICH: Volume ratio = {vol_ratio}")
+        
+        if vol_ratio > 4.0:
+            self.logger.warning(f"❌ SIGNAL INVALIDATED: Volume Climax (ratio {vol_ratio:.1f}x > 4.0x)")
             signal.signal_type = SignalType.NEUTRAL
-            signal.reasons.append(f"INVALIDATED: Volume Climax (Ratio {signal.indicators.get('volume_spike_ratio'):.1f}x > 4.0x)")
+            signal.reasons.append(f"INVALIDATED: Volume Climax (Ratio {vol_ratio:.1f}x > 4.0x)")
             return None
-
+        else:
+            self.logger.info(f"✅ Volume Climax check passed")
+        
+        self.logger.info(f"✅ SIGNAL ENRICHED SUCCESSFULLY: {signal.signal_type.value}")
         return signal
 
     def _check_buy_conditions(
@@ -467,7 +526,7 @@ class SignalGenerator:
             return TradingSignal(
                 signal_type=SignalType.BUY,
                 confidence=confidence,
-                timestamp=current_candle.timestamp,
+                generated_at=current_candle.timestamp,
                 price=current_price,
                 reasons=reasons,
                 indicators=indicators or {}
@@ -548,7 +607,7 @@ class SignalGenerator:
             return TradingSignal(
                 signal_type=SignalType.SELL,
                 confidence=confidence,
-                timestamp=current_candle.timestamp,
+                generated_at=current_candle.timestamp,
                 price=current_price,
                 reasons=reasons,
                 indicators=indicators or {}

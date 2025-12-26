@@ -143,11 +143,22 @@ class TestPresentationLayerDependencies:
         return api_files + presentation_files
     
     def test_presentation_has_no_direct_infrastructure_imports(self):
-        """Presentation/API layer should not import directly from infrastructure."""
+        """Presentation/API layer should not import directly from infrastructure.
+        
+        Exception: dependencies.py is the composition root and is allowed to
+        import DIContainer from infrastructure to wire all dependencies.
+        """
         pres_files = self.get_presentation_files()
         violations = []
         
+        # Composition root files are allowed to import infrastructure
+        composition_root_files = ['dependencies.py']
+        
         for filepath in pres_files:
+            # Skip composition root files
+            if any(cr in filepath for cr in composition_root_files):
+                continue
+                
             file_imports = parse_imports(filepath)
             for imp in file_imports.imports:
                 if 'infrastructure' in imp.module.lower():

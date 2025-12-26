@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\domain\entities\state_models.py
+# hypothesis_version: 6.148.2
+
+[0.0, 'PersistedState', 'action', 'adx_value', 'btcusdt', 'candles_processed', 'cooldown_remaining', 'current_state', 'duration_seconds', 'error', 'filter_name', 'from_state', 'message', 'order_id', 'passed', 'position_id', 'position_verified', 'previous_state', 'reason', 'reset', 'restored', 'state', 'stoch_rsi_d', 'stoch_rsi_k', 'success', 'symbol', 'threshold', 'timestamp', 'to_state', 'value', 'vwap_value', '✅ PASS', '❌ FAIL']

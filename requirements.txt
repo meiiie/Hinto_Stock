@@ -16,6 +16,9 @@ websockets>=12.0  # For real-time WebSocket connections
 # Install: pip install <downloaded_wheel_file>
 # TA-Lib==0.4.28  # Uncomment after manual installation
 
+# HMM Regime Detection (Layer 0)
+hmmlearn>=0.3.0
+
 # Scheduling
 APScheduler>=3.10.4
 

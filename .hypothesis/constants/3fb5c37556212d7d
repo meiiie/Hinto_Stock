@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\application\services\hard_filters.py
+# hypothesis_version: 6.148.2
+
+[0.0, 0.001, 25.0, 'ADX', 'Spread', 'adx_threshold', 'spread_threshold', 'spread_threshold_pct']

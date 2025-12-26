@@ -5,9 +5,14 @@ Market Router - WebSocket and REST endpoints for market data
 **Validates: Requirements 1.1, 1.2, 5.2, 5.3, 5.4**
 
 Provides:
-- WebSocket streaming for real-time candle data
+- WebSocket streaming for real-time candle data (via EventBus)
 - Historical data API with indicators
 - Graceful disconnect handling
+
+Architecture:
+- EventBus handles all broadcasting (decoupled from this router)
+- This router only manages WebSocket connections and initial snapshots
+- No more sync/async callback issues!
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
@@ -16,9 +21,11 @@ import json
 import asyncio
 import logging
 
-from src.api.dependencies import get_realtime_service
+from src.api.dependencies import get_realtime_service, get_market_data_repository
 from src.api.websocket_manager import get_websocket_manager, WebSocketManager
+from src.api.event_bus import get_event_bus
 from src.application.services.realtime_service import RealtimeService
+from src.infrastructure.persistence.sqlite_market_data_repository import SQLiteMarketDataRepository
 
 router = APIRouter(
     prefix="/ws",
@@ -34,122 +41,9 @@ market_router = APIRouter(
 logger = logging.getLogger(__name__)
 
 
-# Track if we've subscribed to the RealtimeService
-_service_subscribed = False
-
-
-def _setup_service_bridge(service: RealtimeService, manager: WebSocketManager) -> None:
-    """
-    Setup bridge between RealtimeService and WebSocketManager.
-    
-    This creates a Pub/Sub pattern where:
-    - Publisher: RealtimeService (Trading Engine)
-    - Subscriber: WebSocket clients via WebSocketManager
-    """
-    global _service_subscribed
-    
-    if _service_subscribed:
-        return
-    
-    def on_update():
-        """Bridge callback - called when RealtimeService has new data."""
-        try:
-            logger.debug("on_update callback triggered")
-            
-            # Get latest data from service
-            data = service.get_latest_indicators(timeframe='1m')
-            if not data:
-                logger.debug("No indicator data available")
-                return
-            
-            # Add candle info
-            latest_candle = service.get_latest_data('1m')
-            if latest_candle:
-                data['type'] = 'candle'
-                data['symbol'] = service.symbol
-                data['timestamp'] = latest_candle.timestamp.isoformat()
-                data['open'] = latest_candle.open
-                data['high'] = latest_candle.high
-                data['low'] = latest_candle.low
-                data['close'] = latest_candle.close
-                data['volume'] = latest_candle.volume
-            
-            # Add signal info if available
-            signal = service.get_current_signals()
-            if signal:
-                data['signal'] = {
-                    'type': signal.signal_type.value,
-                    'price': signal.price,
-                    'entry_price': signal.entry_price,
-                    'stop_loss': signal.stop_loss,
-                    'take_profit': signal.take_profit,
-                    'confidence': signal.confidence,
-                    'risk_reward_ratio': signal.risk_reward_ratio,
-                    'reason': signal.reason
-                }
-            
-            # Schedule broadcast (fire and forget)
-            # Use get_running_loop() to safely create task from sync callback
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(manager.broadcast(data, symbol=service.symbol))
-            except RuntimeError:
-                # No running loop - try get_event_loop for compatibility
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        loop.create_task(manager.broadcast(data, symbol=service.symbol))
-                    else:
-                        # Run synchronously as fallback
-                        asyncio.run(manager.broadcast(data, symbol=service.symbol))
-                except Exception as e:
-                    logger.warning(f"Could not broadcast: {e}")
-            
-        except Exception as e:
-            logger.error(f"Error in service bridge: {e}")
-    
-    def on_signal(signal):
-        """Bridge callback for trading signals."""
-        try:
-            signal_data = {
-                'type': 'signal',
-                'symbol': service.symbol,
-                'signal': {
-                    'type': signal.signal_type.value,
-                    'price': signal.price,
-                    'entry_price': signal.entry_price,
-                    'stop_loss': signal.stop_loss,
-                    'take_profit': signal.take_profit,
-                    'confidence': signal.confidence,
-                    'risk_reward_ratio': signal.risk_reward_ratio,
-                    'reason': signal.reason,
-                    'timestamp': signal.timestamp.isoformat() if hasattr(signal, 'timestamp') else None
-                }
-            }
-            
-            # Use get_running_loop() to safely create task from sync callback
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(manager.broadcast(signal_data, symbol=service.symbol))
-            except RuntimeError:
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        loop.create_task(manager.broadcast(signal_data, symbol=service.symbol))
-                    else:
-                        asyncio.run(manager.broadcast(signal_data, symbol=service.symbol))
-                except Exception as e:
-                    logger.warning(f"Could not broadcast signal: {e}")
-            
-        except Exception as e:
-            logger.error(f"Error broadcasting signal: {e}")
-    
-    # Subscribe to service events
-    service.subscribe_updates(on_update)
-    service.subscribe_signals(on_signal)
-    
-    _service_subscribed = True
-    logger.info("Service bridge established - RealtimeService → WebSocketManager")
+# NOTE: Service bridge has been REMOVED!
+# Broadcasting is now handled by EventBus (see event_bus.py and main.py lifespan)
+# This eliminates the async/sync callback mismatch problem
 
 
 @router.websocket("/stream/{symbol}")
@@ -165,18 +59,21 @@ async def websocket_stream(
     
     Features:
     - Real-time candle data with indicators (VWAP, BB, StochRSI)
-    - Signal notifications
+    - Signal notifications (via EventBus broadcast)
     - Graceful disconnect handling
+    
+    Architecture:
+    - Client connects here and receives initial snapshot
+    - Subsequent updates are pushed via EventBus broadcast worker
+    - No direct coupling between this endpoint and RealtimeService callbacks
     
     Args:
         symbol: Trading pair symbol (e.g., 'btcusdt')
     """
     manager = get_websocket_manager()
     
-    # Setup service bridge if not done
-    _setup_service_bridge(service, manager)
-    
-    # Connect client
+    # Connect client to WebSocketManager
+    # EventBus broadcast worker will automatically send updates to all connected clients
     connection = await manager.connect(websocket, symbol.lower())
     
     try:
@@ -198,9 +95,25 @@ async def websocket_stream(
                 'volume': latest_candle.volume
             }
         
-        await websocket.send_text(json.dumps(initial_data))
+        # Include current signal if available
+        current_signal = service.get_current_signals()
+        if current_signal and current_signal.signal_type.value != 'neutral':
+            initial_data['signal'] = {
+                'type': current_signal.signal_type.value,
+                'price': current_signal.price,
+                'entry_price': getattr(current_signal, 'entry_price', current_signal.price),
+                'stop_loss': getattr(current_signal, 'stop_loss', None),
+                'take_profit': getattr(current_signal, 'take_profit', None),
+                'confidence': current_signal.confidence,
+                'risk_reward_ratio': getattr(current_signal, 'risk_reward_ratio', None),
+                'timestamp': current_signal.timestamp.isoformat() if hasattr(current_signal, 'timestamp') else None
+            }
         
-        # Keep connection alive
+        await websocket.send_text(json.dumps(initial_data))
+        logger.info(f"Client {connection.client_id} connected, initial snapshot sent")
+        
+        # Keep connection alive and handle client messages
+        # Actual data updates are pushed by EventBus broadcast worker
         while True:
             try:
                 # Wait for client messages (ping/pong, subscription changes)
@@ -260,12 +173,15 @@ async def websocket_market_legacy(
 @router.get("/history/{symbol}")
 async def get_market_history(
     symbol: str,
-    timeframe: str = Query(default='15m', regex='^(1m|15m|1h)$'),
+    timeframe: str = Query(default='15m', pattern='^(1m|15m|1h)$'),
     limit: int = Query(default=100, ge=1, le=1000),
-    service: RealtimeService = Depends(get_realtime_service)
+    service: RealtimeService = Depends(get_realtime_service),
+    repo: SQLiteMarketDataRepository = Depends(get_market_data_repository)
 ):
     """
-    Get historical market data with pre-calculated indicators.
+    Get historical market data with hybrid data source.
+    
+    SOTA Phase 3: SQLite first, Binance fallback.
     
     **Validates: Requirements 5.4, 2.1**
     
@@ -277,6 +193,23 @@ async def get_market_history(
     Returns:
         List of candles with VWAP and Bollinger Bands
     """
+    # Step 1: Try SQLite first
+    try:
+        sqlite_candles = repo.get_latest_candles(timeframe, limit)
+        if len(sqlite_candles) >= limit * 0.8:  # 80% threshold
+            logger.debug(f"📦 SQLite hit: {len(sqlite_candles)} candles for {timeframe}")
+            # Sort ascending (SQLite returns DESC)
+            sorted_candles = sorted(sqlite_candles, key=lambda c: c.candle.timestamp)
+            
+            # SOTA FIX: Calculate indicators for SQLite data (same as Binance path)
+            # This ensures VWAP/BB display from history start, not just realtime
+            candles = [c.candle for c in sorted_candles]
+            return service.get_historical_data_with_indicators(timeframe, limit, candles=candles)
+    except Exception as e:
+        logger.warning(f"SQLite query failed: {e}")
+    
+    # Step 2: Fallback to service (Binance REST)
+    logger.debug(f"📡 SQLite miss, falling back to Binance for {timeframe}")
     return service.get_historical_data_with_indicators(timeframe, limit)
 
 
@@ -289,7 +222,12 @@ async def get_websocket_status():
         Connection statistics and active subscriptions
     """
     manager = get_websocket_manager()
-    return manager.get_statistics()
+    event_bus = get_event_bus()
+    
+    return {
+        'websocket': manager.get_statistics(),
+        'event_bus': event_bus.get_statistics()
+    }
 
 
 @router.get("/connections")
@@ -309,19 +247,39 @@ async def get_active_connections():
 @market_router.get("/history")
 async def get_market_history_rest(
     symbol: str = Query(default='btcusdt'),
+    timeframe: str = Query(default='15m', pattern='^(1m|15m|1h)$'),
     limit: int = Query(default=100, ge=1, le=1000),
-    service: RealtimeService = Depends(get_realtime_service)
+    service: RealtimeService = Depends(get_realtime_service),
+    repo: SQLiteMarketDataRepository = Depends(get_market_data_repository)
 ):
     """
     Get historical market data (REST endpoint for frontend).
+    
+    SOTA Phase 3: SQLite first, Binance fallback.
     
     Used by useMarketData hook for data gap filling after reconnect.
     
     Args:
         symbol: Trading pair symbol (default: btcusdt)
+        timeframe: Candle timeframe (default: 15m)
         limit: Number of candles to return (max 1000)
         
     Returns:
         List of candles with indicators
     """
-    return service.get_historical_data_with_indicators('15m', limit)
+    # Step 1: Try SQLite first
+    try:
+        sqlite_candles = repo.get_latest_candles(timeframe, limit)
+        if len(sqlite_candles) >= limit * 0.8:  # 80% threshold
+            logger.debug(f"📦 SQLite hit: {len(sqlite_candles)} candles for {timeframe}")
+            sorted_candles = sorted(sqlite_candles, key=lambda c: c.candle.timestamp)
+            
+            # SOTA FIX: Calculate indicators for SQLite data
+            candles = [c.candle for c in sorted_candles]
+            return service.get_historical_data_with_indicators(timeframe, limit, candles=candles)
+    except Exception as e:
+        logger.warning(f"SQLite query failed: {e}")
+    
+    # Step 2: Fallback to service (Binance REST)
+    logger.debug(f"📡 SQLite miss, falling back to Binance for {timeframe}")
+    return service.get_historical_data_with_indicators(timeframe, limit)

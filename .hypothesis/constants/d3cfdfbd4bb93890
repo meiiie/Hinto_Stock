@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\application\services\state_recovery_service.py
+# hypothesis_version: 6.148.2
+
+['FILLED', 'TradingStateMachine', 'blocked', 'btcusdt', 'no_action', 'reset', 'restored', 'status']

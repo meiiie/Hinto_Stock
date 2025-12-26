@@ -27,6 +27,8 @@ from .i_websocket_client import (
 )
 from .i_rest_client import IRestClient
 from .i_data_aggregator import IDataAggregator
+from .i_book_ticker_client import IBookTickerClient, BookTickerData
+from .i_exchange_service import IExchangeService, ExchangeError
 
 __all__ = [
     # Indicator interfaces
@@ -52,4 +54,10 @@ __all__ = [
     'IRestClient',
     # Aggregator
     'IDataAggregator',
+    # BookTicker
+    'IBookTickerClient',
+    'BookTickerData',
+    # Exchange Service
+    'IExchangeService',
+    'ExchangeError',
 ]

@@ -208,10 +208,12 @@ class BollingerCalculator:
         upper = sma + (std * self.std_multiplier)
         lower = sma - (std * self.std_multiplier)
         
-        # Fill NaN with 0 for early candles
-        upper = upper.fillna(0).tolist()
-        lower = lower.fillna(0).tolist()
-        middle = sma.fillna(0).tolist()
+        # SOTA: Use forward fill for mid-series gaps, then 0 for warm-up period
+        # Frontend trims first 50 candles (WARMUP_PERIOD) so warm-up zeros are not displayed
+        # This ensures indicators appear correctly after warm-up, not as flat lines at start
+        upper = upper.ffill().fillna(0.0).tolist()
+        lower = lower.ffill().fillna(0.0).tolist()
+        middle = sma.ffill().fillna(0.0).tolist()
         
         return BollingerSeriesResult(
             upper_band=upper,

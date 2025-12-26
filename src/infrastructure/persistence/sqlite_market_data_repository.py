@@ -6,6 +6,7 @@ SQLite implementation of MarketDataRepository interface.
 
 import sqlite3
 import shutil
+import logging
 from datetime import datetime
 from typing import List, Optional
 from pathlib import Path
@@ -23,6 +24,12 @@ class SQLiteMarketDataRepository(MarketDataRepository):
     def __init__(self, db_path: str = "crypto_data.db"):
         self.db_path = db_path
         self._memory_conn = None
+        self.logger = logging.getLogger(__name__)
+        
+        # SOTA FIX: Create parent directory if needed (prevents init failure)
+        if db_path != ":memory:":
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        
         if db_path == ":memory:":
             self._memory_conn = sqlite3.connect(":memory:")
         self._init_database()
@@ -40,11 +47,12 @@ class SQLiteMarketDataRepository(MarketDataRepository):
                 conn.close()
     
     def _init_database(self) -> None:
-        """Initialize database tables"""
+        """Initialize database tables for all timeframes"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
-            for table in ['btc_15m', 'btc_1h']:
+            # SOTA FIX: Include 1m table for real-time candle persistence
+            for table in ['btc_1m', 'btc_15m', 'btc_1h']:
                 cursor.execute(f'''
                     CREATE TABLE IF NOT EXISTS {table} (
                         timestamp TEXT PRIMARY KEY,
@@ -58,8 +66,15 @@ class SQLiteMarketDataRepository(MarketDataRepository):
                         volume_ma_20 REAL
                     )
                 ''')
+                
+                # Add index for faster timestamp queries
+                cursor.execute(f'''
+                    CREATE INDEX IF NOT EXISTS idx_{table}_timestamp 
+                    ON {table}(timestamp)
+                ''')
             
             conn.commit()
+            self.logger.debug(f"Initialized database tables (btc_1m, btc_15m, btc_1h)")
     
     def _get_table_name(self, timeframe: str) -> str:
         """Convert timeframe to table name"""
@@ -92,12 +107,44 @@ class SQLiteMarketDataRepository(MarketDataRepository):
             raise RepositoryError(f"Failed to save candle: {e}", e)
     
     def save_market_data(self, market_data: MarketData) -> None:
-        """Save market data aggregate"""
-        self.save_candle(
-            market_data.candle,
-            market_data.indicator,
-            market_data.timeframe
-        )
+        """Save MarketData object (candle with indicators)"""
+        self.save_candle(market_data.candle, market_data.indicator, market_data.timeframe)
+
+    def save_candle_simple(self, candle: Candle, timeframe: str) -> None:
+        """
+        Save candle OHLCV only (without indicators).
+        
+        SOTA FIX: Lightweight persistence for real-time candles.
+        Used by RealtimeService to persist closed candles.
+        
+        Args:
+            candle: Candle entity with OHLCV data
+            timeframe: '1m', '15m', or '1h'
+        """
+        try:
+            table = self._get_table_name(timeframe)
+            
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f'''
+                    INSERT OR REPLACE INTO {table}
+                    (timestamp, open, high, low, close, volume, ema_7, rsi_6, volume_ma_20)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    candle.timestamp.isoformat(),
+                    candle.open,
+                    candle.high,
+                    candle.low,
+                    candle.close,
+                    candle.volume,
+                    None,  # ema_7
+                    None,  # rsi_6
+                    None   # volume_ma_20
+                ))
+                conn.commit()
+                self.logger.debug(f"📦 Persisted {timeframe} candle: {candle.timestamp}")
+        except Exception as e:
+            raise RepositoryError(f"Failed to save simple candle: {e}", e)
     
     def get_latest_candles(self, timeframe: str, limit: int = 100) -> List[MarketData]:
         """Get latest N candles"""

@@ -170,6 +170,11 @@ class TPCalculator:
         Returns:
             TPCalculationResult or None
         """
+        # Check if swing_detector is available
+        if self.swing_detector is None:
+            self.logger.warning("swing_detector not available, using fallback TP calculation")
+            return self._calculate_fallback_buy_tp(entry_price, stop_loss)
+        
         # Find resistance levels (swing highs)
         supports, resistances = self.swing_detector.find_support_resistance_levels(
             candles, num_levels=5
@@ -247,6 +252,11 @@ class TPCalculator:
         Returns:
             TPCalculationResult or None
         """
+        # Check if swing_detector is available
+        if self.swing_detector is None:
+            self.logger.warning("swing_detector not available, using fallback TP calculation")
+            return self._calculate_fallback_sell_tp(entry_price, stop_loss)
+        
         # Find support levels (swing lows)
         supports, resistances = self.swing_detector.find_support_resistance_levels(
             candles, num_levels=5

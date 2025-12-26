@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\infrastructure\websocket\binance_book_ticker_client.py
+# hypothesis_version: 6.148.2
+
+[5.0, 'A', 'B', 'a', 'b', 'btcusdt', 'data', 'data_count', 'is_connected', 'is_running', 's', 'stream', 'subscribed_symbols', 'symbols_with_data']

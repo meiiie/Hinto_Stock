@@ -99,17 +99,27 @@ class BinanceWebSocketClient:
         # Connection parameters (for reconnection)
         self._symbol: Optional[str] = None
         self._interval: Optional[str] = None
+        self._intervals: list[str] = []  # SOTA: Multi-stream support
         
         # Logging
         self.logger = logging.getLogger(__name__)
     
-    async def connect(self, symbol: str = "btcusdt", interval: str = "1m", start_loop: bool = True) -> None:
+    async def connect(
+        self, 
+        symbol: str = "btcusdt", 
+        interval: str = "1m",
+        intervals: Optional[list[str]] = None,  # SOTA: Multi-stream support
+        start_loop: bool = True
+    ) -> None:
         """
         Connect to Binance WebSocket stream.
         
+        SOTA: Supports multi-timeframe via Combined Streams.
+        
         Args:
             symbol: Trading pair symbol (e.g., 'btcusdt')
-            interval: Kline interval (e.g., '1m', '15m', '1h')
+            interval: Kline interval for single stream (legacy, e.g., '1m')
+            intervals: List of intervals for combined streams (e.g., ['1m', '15m', '1h'])
             start_loop: Whether to start the receive loop task (default: True)
         
         Raises:
@@ -127,10 +137,19 @@ class BinanceWebSocketClient:
         # Store connection parameters for reconnection
         self._symbol = symbol
         self._interval = interval
+        self._intervals = intervals or [interval]  # Default to single interval
         
-        # Build WebSocket URL
-        stream_name = f"{symbol.lower()}@kline_{interval}"
-        url = f"{self.base_url}/{stream_name}"
+        # SOTA: Build WebSocket URL for combined streams
+        if len(self._intervals) > 1:
+            # Combined Stream URL: wss://stream.binance.com:9443/stream?streams=<s1>/<s2>/<s3>
+            streams = [f"{symbol.lower()}@kline_{i}" for i in self._intervals]
+            stream_query = "/".join(streams)
+            url = f"wss://stream.binance.com:9443/stream?streams={stream_query}"
+            self.logger.info(f"🚀 SOTA: Multi-stream connection: {self._intervals}")
+        else:
+            # Single stream (legacy)
+            stream_name = f"{symbol.lower()}@kline_{interval}"
+            url = f"{self.base_url}/{stream_name}"
         
         self.logger.info(f"Connecting to Binance WebSocket: {url}")
         
@@ -251,9 +270,15 @@ class BinanceWebSocketClient:
         
         try:
             # Attempt to reconnect using stored parameters
-            if self._symbol and self._interval:
+            if self._symbol and (self._interval or self._intervals):
                 # CRITICAL FIX: Do not start new loop, as we are already inside one
-                await self.connect(self._symbol, self._interval, start_loop=False)
+                # SOTA: Reconnect with same intervals
+                await self.connect(
+                    self._symbol, 
+                    self._interval, 
+                    intervals=self._intervals if len(self._intervals) > 1 else None,
+                    start_loop=False
+                )
                 
                 # Reset delay on successful connection
                 self._current_reconnect_delay = self.initial_reconnect_delay
@@ -271,22 +296,39 @@ class BinanceWebSocketClient:
         """
         Parse and process incoming WebSocket message.
         
+        SOTA: Handles both single stream and combined stream formats.
+        Combined stream format: {"stream": "btcusdt@kline_15m", "data": {...}}
+        
         Args:
             message: Raw JSON message from WebSocket
         """
         try:
-            data = json.loads(message)
+            raw_data = json.loads(message)
+            
+            # SOTA: Handle combined stream wrapper
+            if "stream" in raw_data and "data" in raw_data:
+                # Combined stream format
+                stream_name = raw_data["stream"]  # e.g., "btcusdt@kline_15m"
+                data = raw_data["data"]
+                # Extract interval from stream name: "btcusdt@kline_15m" -> "15m"
+                interval = stream_name.split("@kline_")[1] if "@kline_" in stream_name else "1m"
+            else:
+                # Single stream format (legacy)
+                data = raw_data
+                interval = self._interval or "1m"
             
             # Calculate latency
             if 'E' in data:  # Event time
                 event_time = datetime.fromtimestamp(data['E'] / 1000)
                 latency = (datetime.now() - event_time).total_seconds() * 1000
                 self._latency_ms = int(latency)
-                # print(f"DEBUG: Latency updated: {self._latency_ms}ms")
             
             # Parse message to Candle entity
             candle = self._parser.parse_kline_message(data)
             metadata = self._parser.extract_metadata(data)
+            
+            # SOTA: Add interval to metadata for multi-timeframe routing
+            metadata['interval'] = interval
             
             # Notify raw message callbacks
             for callback in self._message_callbacks:
@@ -300,7 +342,8 @@ class BinanceWebSocketClient:
             
             # Notify candle callbacks if parsing successful
             if candle:
-                self.logger.info(f"📊 Candle: {candle.close:.2f} - notifying {len(self._candle_callbacks)} callbacks")
+                # SOTA: Log with interval info
+                self.logger.info(f"📊 [{interval}] Candle: {candle.close:.2f} - notifying {len(self._candle_callbacks)} callbacks")
                 for callback in self._candle_callbacks:
                     try:
                         if asyncio.iscoroutinefunction(callback):

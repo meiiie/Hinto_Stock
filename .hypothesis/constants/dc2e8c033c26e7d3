@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\config.py
+# hypothesis_version: 6.148.2
+
+[2.0, '.env', '1', 'BASE_URL', 'BINANCE_API_KEY', 'BINANCE_API_SECRET', 'DB_PATH', 'PAPER', 'REAL', 'TRADING_MODE', 'crypto_data.db', 'false', 'true', 'yes']

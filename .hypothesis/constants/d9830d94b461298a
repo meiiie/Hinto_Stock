@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\application\services\hard_filters.py
+# hypothesis_version: 6.148.2
+
+[0.0, 0.001, 5.0, 25.0, 'ADX', 'IBookTickerClient', 'Spread', 'Spread (Real)', 'Spread_Realtime', 'adx_threshold', 'btcusdt', 'estimated', 'spread_threshold', 'spread_threshold_pct', 'stale_data_seconds', 'with_realtime']

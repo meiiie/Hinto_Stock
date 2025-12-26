@@ -1,0 +1,302 @@
+# 🌐 GLOBAL ARCHITECTURE - Hinto Stock Trading System
+
+**Document Version:** 1.0
+**Last Updated:** 2025-12-22
+**Maintainer:** Project Manager AI
+
+---
+
+## 1. SYSTEM OVERVIEW
+
+**Hinto Stock** là nền tảng trading cryptocurrency 24/7 với kiến trúc **3-layer hybrid**, được xây dựng dưới dạng Desktop Application.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          DESKTOP APP (Electron/Tauri)               │
+├─────────────────────────────────────────────────────────────────────┤
+│                            PRESENTATION LAYER                       │
+│                        (React + TailwindCSS UI)                     │
+└───────────────────────────────────┬─────────────────────────────────┘
+                                    │ IPC/Events
+┌───────────────────────────────────▼─────────────────────────────────┐
+│                          APPLICATION LAYER                          │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
+│  │ Layer 3     │  │ Layer 2     │  │ Layer 1     │  │ Risk        │  │
+│  │ LLM Planner │  │ Candle      │  │ Real-time   │  │ Management  │  │
+│  │ (30m-1h)    │  │ Confirmer   │  │ Signals     │  │ System      │  │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  │
+└───────────────────────────────────┬─────────────────────────────────┘
+                                    │ Domain Events
+┌───────────────────────────────────▼─────────────────────────────────┐
+│                            DOMAIN LAYER                             │
+│  (Entities, Value Objects, Domain Services, Repository Interfaces)  │
+└───────────────────────────────────┬─────────────────────────────────┘
+                                    │ Repositories
+┌───────────────────────────────────▼─────────────────────────────────┐
+│                         INFRASTRUCTURE LAYER                         │
+│  (Binance API, SQLite DB, WebSocket, TA-Lib, DI Container, Logging) │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 2. 3-LAYER SIGNAL ARCHITECTURE
+
+### Layer 1: Real-time Trading Signals (Core)
+| Indicator | Formula | Purpose |
+|-----------|---------|---------|
+| **VWAP** | ∑(Price × Volume) / ∑Volume | Trend direction filter |
+| **Bollinger Bands** | SMA(20) ± 2σ | Volatility envelope |
+| **StochRSI** | (RSI - min(RSI)) / (max(RSI) - min(RSI)) | Entry trigger |
+
+**Buy Signal Logic:**
+```
+Price > VWAP (Uptrend confirmed)
+AND Price touches Lower BB OR VWAP (Pullback zone)
+AND StochRSI crosses above 20 (Momentum shift)
+AND Volume > Previous Red Candle Volume (Buying pressure)
+```
+
+### Layer 2: Candle Confirmation
+- Bullish Engulfing patterns
+- Pin Bar / Hammer detection
+- Inside Bar Breakout
+
+### Layer 3: LLM Strategic Planning
+- Market regime analysis
+- Risk profile adjustment
+- News sentiment (future)
+
+---
+
+## 3. TECHNOLOGY STACK
+
+### Frontend
+| Component | Technology | Version |
+|-----------|-----------|---------|
+| Framework | React | 18.x |
+| Build Tool | Vite | 5.x |
+| Styling | TailwindCSS | 3.x |
+| State | Zustand | 4.x |
+| Charts | Lightweight Charts | 4.x |
+| Desktop | Electron/Tauri | Latest |
+
+### Backend
+| Component | Technology | Version |
+|-----------|-----------|---------|
+| Language | Python | 3.11+ |
+| Async | asyncio + aiohttp | - |
+| Validation | Pydantic | 2.x |
+| DI | dependency-injector | 4.x |
+| Exchange | ccxt | Latest |
+
+### Data
+| Component | Technology | Notes |
+|-----------|-----------|-------|
+| Primary DB | SQLite | Desktop deployment |
+| Cache | In-memory | Indicator calculations |
+| Queue | asyncio.Queue | Internal message passing |
+
+---
+
+## 4. DATA FLOW
+
+```
+[Binance WebSocket]
+        │
+        ▼
+┌───────────────────┐
+│  Price Aggregator │ ← Raw OHLCV tick data
+└─────────┬─────────┘
+          │
+          ▼
+┌───────────────────┐
+│ Indicator Engine  │ ← Calculate VWAP, BB, StochRSI
+└─────────┬─────────┘
+          │
+          ├──────────────────┐
+          ▼                  ▼
+┌─────────────────┐  ┌───────────────────┐
+│ Signal Generator│  │ Pattern Detector  │
+│   (Layer 1)     │  │   (Layer 2)       │
+└────────┬────────┘  └─────────┬─────────┘
+         │                     │
+         ▼                     ▼
+┌─────────────────────────────────────────┐
+│            Signal Aggregator            │
+│   (Combine Layer 1 + 2, apply rules)    │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
+│            Risk Manager                 │
+│   (Position sizing, SL/TP, margin)      │
+└────────────────┬────────────────────────┘
+                 │
+                 ├─────────────────┐
+                 ▼                 ▼
+         ┌─────────────┐   ┌─────────────┐
+         │ Order Queue │   │   UI Layer  │
+         │  (Execute)  │   │  (Display)  │
+         └─────────────┘   └─────────────┘
+```
+
+---
+
+## 5. EVENT BUS ARCHITECTURE
+
+### Event Types
+```typescript
+// Core events
+type EventType = 
+  | 'price:update'       // Raw price tick
+  | 'candle:close'       // Candle completed
+  | 'indicator:update'   // Indicator recalculated
+  | 'signal:new'         // New trading signal
+  | 'signal:expired'     // Signal no longer valid
+  | 'position:open'      // Trade executed
+  | 'position:close'     // Position closed
+  | 'risk:alert'         // Risk threshold reached
+  | 'system:error';      // System error
+```
+
+### Event Flow
+```
+[Producer] → EventBus → [Consumer 1]
+                    → [Consumer 2]
+                    → [Consumer N]
+```
+
+---
+
+## 6. DIRECTORY STRUCTURE
+
+```
+Hinto_Stock/
+├── app/
+│   ├── frontend/           # React UI
+│   │   ├── src/
+│   │   │   ├── components/
+│   │   │   ├── pages/
+│   │   │   ├── hooks/
+│   │   │   ├── stores/
+│   │   │   └── services/
+│   │   └── package.json
+│   │
+│   └── backend/            # Python backend
+│       ├── domain/
+│       │   ├── entities/
+│       │   ├── services/
+│       │   └── value_objects/
+│       ├── application/
+│       │   ├── use_cases/
+│       │   └── dtos/
+│       ├── infrastructure/
+│       │   ├── exchanges/
+│       │   ├── repositories/
+│       │   └── websocket/
+│       └── main.py
+│
+├── documents/              # AI Agent System
+│   ├── agents/
+│   ├── shared-context/
+│   ├── communication/
+│   └── workflows/
+│
+└── tests/
+    ├── unit/
+    ├── integration/
+    └── e2e/
+```
+
+---
+
+## 7. AI AGENT COGNITIVE FRAMEWORK
+
+### SOTA Techniques Applied
+
+| Technique | Source | Usage |
+|-----------|--------|-------|
+| **Meta-Prompting** | Stanford/OpenAI | PM as Conductor orchestrating expert agents |
+| **ReAct Pattern** | Google Research | Thought → Action → Observation loop |
+| **Chain-of-Thought** | Various | "Think step-by-step" for complex reasoning |
+| **PTCF Framework** | Google Gemini | Persona-Task-Context-Format structure |
+| **XML Tags** | Anthropic | Structured prompt sections |
+
+### Agent Interaction Protocol
+
+```
+             Human Owner
+                  ↓
+        [Project Manager AI]  ← Meta-Conductor
+                  ↓
+    ╔═══════════════════════════════════╗
+    ║  ReAct Loop for Each Task         ║
+    ╠═══════════════════════════════════╣
+    ║  <thought> Analyze situation      ║
+    ║  <action>  Execute or delegate    ║
+    ║  <observation> Process results    ║
+    ╚═══════════════════════════════════╝
+                  ↓
+    ┌─────────┬─────────┬─────────┐
+    ↓         ↓         ↓         ↓
+Frontend  Backend  Database    QA
+    ↓         ↓         ↓         ↓
+    └─────────┴─────────┴─────────┘
+              Collaboration
+```
+
+### Trigger Commands
+
+| Command | Effect |
+|---------|--------|
+| (Default) | Standard concise response |
+| `ULTRATHINK` | Deep multi-dimensional analysis |
+| `Think step-by-step` | Chain-of-Thought reasoning |
+| `<thinking>` | Explicit internal reasoning block |
+
+### Context Loading Order
+```
+1. agents/{role}/system-prompt.md  ← Primary identity
+2. shared-context/global-architecture.md  ← This file
+3. agents/{role}/context/progress.md  ← Session continuity
+4. (Task-specific context as needed)
+```
+
+---
+
+## 8. KEY METRICS TARGETS
+
+| Metric | Target | Rationale |
+|--------|--------|-----------|
+| Win Rate | > 55% | Trend following baseline |
+| Risk/Reward | > 1:1.5 | Profit > Risk per trade |
+| Max Drawdown | < 15% | Capital preservation |
+| Profit Factor | > 1.5 | Gross Profit / Gross Loss |
+| Latency | < 100ms | Signal to UI update |
+
+---
+
+## 8. CURRENT STATUS
+
+**Phase:** 🔄 Restructuring (Layer 1 Focus)
+
+| Component | Status | Owner |
+|-----------|--------|-------|
+| Layer 1 Core | 🟡 In Progress | Backend |
+| UI Dashboard | 🟡 In Progress | Frontend |
+| Signal Display | 🔴 Needs Work | Frontend |
+| Database | 🟢 Stable | Database |
+| Testing | 🟡 Partial | QA |
+
+---
+
+## 9. CHANGE LOG
+
+| Date | Change | Author |
+|------|--------|--------|
+| 2025-12-22 | Initial architecture document | Project Manager AI |
+
+---
+
+**IMPORTANT:** This document is the single source of truth for system architecture. All agents MUST read this before starting any work.

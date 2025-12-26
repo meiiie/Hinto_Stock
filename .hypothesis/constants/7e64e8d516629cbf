@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\domain\entities\exchange_models.py
+# hypothesis_version: 6.148.2
+
+[0.0, 'CANCELED', 'FILLED', 'LONG', 'NEW', 'PARTIALLY_FILLED', 'REJECTED', 'SHORT']

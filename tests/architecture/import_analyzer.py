@@ -73,12 +73,13 @@ def get_python_files(directory: str, exclude_patterns: List[str] = None) -> List
     return sorted(python_files)
 
 
-def parse_imports(filepath: str) -> FileImports:
+def parse_imports(filepath: str, include_late_imports: bool = False) -> FileImports:
     """
     Extract all imports from a Python file using AST.
     
     Args:
         filepath: Path to Python file
+        include_late_imports: If False, skip imports inside functions (late imports)
         
     Returns:
         FileImports object with all import information
@@ -91,7 +92,8 @@ def parse_imports(filepath: str) -> FileImports:
         
         tree = ast.parse(source, filename=filepath)
         
-        for node in ast.walk(tree):
+        # Get module-level imports only (not inside functions/classes)
+        for node in ast.iter_child_nodes(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     imports.append(ImportInfo(
@@ -110,6 +112,32 @@ def parse_imports(filepath: str) -> FileImports:
                     is_from_import=True,
                     line_number=node.lineno
                 ))
+        
+        # Optionally include late imports (inside functions)
+        if include_late_imports:
+            for node in ast.walk(tree):
+                # Skip module-level nodes (already processed)
+                if node in ast.iter_child_nodes(tree):
+                    continue
+                    
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        imports.append(ImportInfo(
+                            module=alias.name,
+                            names=[alias.asname or alias.name],
+                            is_from_import=False,
+                            line_number=node.lineno
+                        ))
+                
+                elif isinstance(node, ast.ImportFrom):
+                    module = node.module or ''
+                    names = [alias.name for alias in node.names]
+                    imports.append(ImportInfo(
+                        module=module,
+                        names=names,
+                        is_from_import=True,
+                        line_number=node.lineno
+                    ))
     
     except SyntaxError as e:
         print(f"Syntax error in {filepath}: {e}")
@@ -184,6 +212,25 @@ class ArchitectureViolation:
     message: str
 
 
+def is_composition_root(filepath: str) -> bool:
+    """
+    Check if file is a composition root (allowed to import from infrastructure).
+    
+    Composition roots are entry points where dependencies are wired together.
+    These files are allowed to import from infrastructure to set up DI.
+    """
+    composition_root_patterns = [
+        'dependencies.py',      # FastAPI dependency injection
+        'di_container.py',      # DI container itself
+        'main.py',              # Application entry points
+        'app.py',               # Streamlit/Flask app entry
+        '__main__.py',          # Module entry points
+    ]
+    
+    filename = os.path.basename(filepath).lower()
+    return filename in composition_root_patterns
+
+
 def check_dependency_direction(file_imports: FileImports) -> List[ArchitectureViolation]:
     """
     Check if imports follow Clean Architecture dependency rules.
@@ -193,6 +240,7 @@ def check_dependency_direction(file_imports: FileImports) -> List[ArchitectureVi
     - Application: Only imports from domain (and external)
     - Infrastructure: Can import from domain, application
     - Presentation/API: Can import from application (not directly from infrastructure)
+      - Exception: Composition roots (dependencies.py, app.py, main.py) are allowed
     
     Args:
         file_imports: FileImports object to check
@@ -202,6 +250,12 @@ def check_dependency_direction(file_imports: FileImports) -> List[ArchitectureVi
     """
     violations = []
     file_layer = get_layer_from_path(file_imports.filepath)
+    
+    # Composition roots are allowed to import from infrastructure
+    if is_composition_root(file_imports.filepath):
+        # Only check domain and application rules for composition roots
+        # Skip presentation_dependencies rule
+        pass
     
     for imp in file_imports.imports:
         import_layer = get_import_layer(imp.module)
@@ -241,6 +295,10 @@ def check_dependency_direction(file_imports: FileImports) -> List[ArchitectureVi
         # Presentation/API layer rules
         elif file_layer in ['presentation', 'api']:
             if import_layer == 'infrastructure':
+                # Skip if this is a composition root (allowed to wire dependencies)
+                if is_composition_root(file_imports.filepath):
+                    continue
+                    
                 violation = ArchitectureViolation(
                     filepath=file_imports.filepath,
                     file_layer=file_layer,

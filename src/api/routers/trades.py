@@ -134,6 +134,88 @@ async def reset_account(
     return {"success": True, "message": "Account reset to $10,000"}
 
 
+@router.post("/execute/{position_id}")
+async def execute_pending(
+    position_id: str,
+    service: RealtimeService = Depends(get_realtime_service),
+    paper_service: PaperTradingService = Depends(get_paper_trading_service)
+):
+    """
+    Manually execute a PENDING order at CURRENT market price.
+    
+    This is a MARKET ORDER - fills immediately at current price,
+    not at the original limit entry price.
+    
+    Use case: User sees PENDING order and wants to enter NOW
+    instead of waiting for limit price to be hit.
+    
+    Args:
+        position_id: ID of the PENDING order to execute
+        
+    Returns:
+        Execution result with fill price
+    """
+    from datetime import datetime
+    
+    # Get current price
+    latest_candle = service.get_latest_data('1m')
+    if not latest_candle or latest_candle.close <= 0:
+        return {"success": False, "error": "Cannot determine current price"}
+    
+    current_price = latest_candle.close
+    
+    # Find the pending order
+    pending_orders = paper_service.repo.get_pending_orders()
+    target_order = None
+    
+    for order in pending_orders:
+        if order.id == position_id:
+            target_order = order
+            break
+    
+    if not target_order:
+        return {
+            "success": False, 
+            "error": f"PENDING order not found: {position_id}"
+        }
+    
+    # Execute at CURRENT price (market order)
+    original_entry = target_order.entry_price
+    target_order.entry_price = current_price  # Fill at market price
+    target_order.status = 'OPEN'
+    target_order.open_time = datetime.now()
+    
+    # Recalculate liquidation price
+    if target_order.side == 'LONG':
+        target_order.liquidation_price = current_price - (target_order.margin / target_order.quantity)
+    else:
+        target_order.liquidation_price = current_price + (target_order.margin / target_order.quantity)
+    
+    paper_service.repo.update_order(target_order)
+    
+    logger.info(
+        f"✅ MARKET FILLED {target_order.side} {target_order.symbol} @ {current_price:.2f} "
+        f"(was PENDING @ {original_entry:.2f})"
+    )
+    
+    # Trigger state machine callback
+    if paper_service.on_order_filled:
+        try:
+            paper_service.on_order_filled(target_order.id)
+        except Exception as e:
+            logger.error(f"Error in on_order_filled callback: {e}")
+    
+    return {
+        "success": True,
+        "message": f"Order filled at market price",
+        "order_id": target_order.id,
+        "side": target_order.side,
+        "original_entry": original_entry,
+        "fill_price": current_price,
+        "size_usd": target_order.quantity * current_price
+    }
+
+
 @router.post("/simulate")
 async def simulate_signal(
     signal_data: dict,
@@ -152,6 +234,9 @@ async def simulate_signal(
     Returns:
         Trade execution result
     """
+    from datetime import datetime
+    from src.domain.entities.trading_signal import TradingSignal, SignalType
+    
     signal_type = signal_data.get("signal_type", "BUY").upper()
     
     if signal_type not in ["BUY", "SELL"]:
@@ -172,36 +257,43 @@ async def simulate_signal(
     if signal_type == "BUY":
         stop_loss = current_price * (1 - risk_percent)
         take_profit = current_price * (1 + risk_percent * rr_ratio)
-        side = "LONG"
+        sig_type = SignalType.BUY
     else:
         stop_loss = current_price * (1 + risk_percent)
         take_profit = current_price * (1 - risk_percent * rr_ratio)
-        side = "SHORT"
+        sig_type = SignalType.SELL
+    
+    # Create TradingSignal object (required by execute_trade)
+    trading_signal = TradingSignal(
+        signal_type=sig_type,
+        confidence=0.75,  # Default confidence for test
+        timestamp=datetime.now(),
+        price=current_price,
+        entry_price=current_price,
+        stop_loss=stop_loss,
+        tp_levels={'tp1': take_profit},
+        indicators={},
+        reasons=[f"SIMULATED_{signal_type}_SIGNAL"]
+    )
     
     # Execute the simulated trade
     try:
-        trade = paper_service.execute_trade(
-            symbol="BTCUSDT",
-            side=side,
-            entry_price=current_price,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
-            signal_confidence=0.75,  # Default confidence for test
-            signal_reason=f"SIMULATED_{signal_type}_SIGNAL"
+        position_id = paper_service.execute_trade(
+            signal=trading_signal,
+            symbol="BTCUSDT"
         )
         
-        if trade:
+        if position_id:
             return {
                 "success": True,
-                "trade_id": trade.id,
-                "entry_price": trade.entry_price,
-                "stop_loss": trade.stop_loss,
-                "take_profit": trade.take_profit,
-                "side": trade.side,
-                "quantity": trade.quantity
+                "trade_id": position_id,
+                "entry_price": current_price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "side": "LONG" if signal_type == "BUY" else "SHORT"
             }
         else:
-            return {"success": False, "error": "Trade execution failed"}
+            return {"success": False, "error": "Trade execution returned None (position limit or insufficient balance)"}
             
     except Exception as e:
         logger.error(f"Simulate signal error: {e}")

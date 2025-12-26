@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\infrastructure\websocket\message_parser.py
+# hypothesis_version: 6.148.2
+
+[1000, 'E', 'L', 'c', 'e', 'event_time', 'event_type', 'f', 'first_trade_id', 'h', 'i', 'interval', 'is_closed', 'k', 'kline', 'l', 'last_trade_id', 'n', 'number_of_trades', 'o', 's', 'symbol', 't', 'v', 'x']

@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\src\application\services\realtime_service.py
+# hypothesis_version: 6.148.2
+
+[0.0, 0.0005, 100, 1000, 2000, '15m', '15m_candles', '1h', '1h_candles', '1m', '1m_candles', 'EventBus', 'No warm-up required', 'Service not running', 'bandwidth', 'bb_lower', 'bb_middle', 'bb_upper', 'bollinger', 'btcusdt', 'close', 'confidence', 'connection', 'd', 'data', 'entry_price', 'hard_filters', 'high', 'iloc', 'is_closed', 'is_connected', 'is_running', 'k', 'latency_ms', 'latest', 'latest_15m', 'latest_1h', 'latest_1m', 'low', 'lower_band', 'middle_band', 'neutral', 'open', 'percent_b', 'price', 'reason', 'reasons', 'reconnect_count', 'risk_reward_ratio', 'rsi', 'rsi_6', 'signals', 'state', 'state_machine', 'stoch_d', 'stoch_k', 'stoch_rsi', 'stop_loss', 'symbol', 'take_profit', 'time', 'timestamp', 'type', 'upper_band', 'volume', 'vwap', 'zone']

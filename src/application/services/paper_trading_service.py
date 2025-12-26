@@ -1,7 +1,7 @@
 import uuid
 import json
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Callable
 from dataclasses import dataclass
 from src.domain.entities.paper_position import PaperPosition
 from src.domain.entities.trading_signal import TradingSignal, SignalType
@@ -59,6 +59,12 @@ class PaperTradingService:
         self.MAX_POSITIONS = 3
         self.RISK_PER_TRADE = 0.015  # 1.5% risk per trade (Tuned)
         self.LEVERAGE = 1
+        
+        # State Machine Callbacks (ISSUE-001 Fix)
+        # Called when a PENDING order is filled and becomes OPEN
+        self.on_order_filled: Optional[Callable[[str], None]] = None
+        # Called when a position is closed (SL/TP/LIQ/MANUAL)
+        self.on_position_closed: Optional[Callable[[str, str], None]] = None
 
     def get_wallet_balance(self) -> float:
         """Get Wallet Balance (Total Deposited + Realized PnL)"""
@@ -211,6 +217,13 @@ class PaperTradingService:
         position = self.repo.get_order(position_id)
         if position and position.status == 'OPEN':
             self.close_position(position, current_price, reason)
+            
+            # ISSUE-001 Fix: Notify state machine of manual close
+            if self.on_position_closed:
+                try:
+                    self.on_position_closed(position_id, reason)
+                except Exception as e:
+                    logger.error(f"Error in on_position_closed callback: {e}")
             return True
         return False
 
@@ -290,6 +303,13 @@ class PaperTradingService:
                     order.open_time = datetime.now() # Update fill time
                     self.repo.update_order(order)
                     logger.info(f"✅ FILLED {order.side} {order.symbol} @ {order.entry_price}")
+                    
+                    # ISSUE-001 Fix: Notify state machine of order fill
+                    if self.on_order_filled:
+                        try:
+                            self.on_order_filled(order.id)
+                        except Exception as e:
+                            logger.error(f"Error in on_order_filled callback: {e}")
 
         # B. Handle OPEN Positions
         active_positions = self.get_positions()
@@ -374,6 +394,13 @@ class PaperTradingService:
 
             if exit_price:
                 self.close_position(pos, exit_price, reason)
+                
+                # ISSUE-001 Fix: Notify state machine of position close
+                if self.on_position_closed:
+                    try:
+                        self.on_position_closed(pos.id, reason)
+                    except Exception as e:
+                        logger.error(f"Error in on_position_closed callback: {e}")
 
     # ==================== NEW METHODS FOR DESKTOP APP ====================
     

@@ -2,26 +2,56 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useMarketData } from '../hooks/useMarketData';
 import { THEME, formatPrice } from '../styles/theme';
 
+// Position interface aligned with backend PaperPosition
 interface Position {
     id: string;
     symbol: string;
     side: 'LONG' | 'SHORT';
-    status: string;
+    status: 'PENDING' | 'OPEN' | 'CLOSED' | 'CANCELLED';
     entry_price: number;
-    quantity: number;
-    margin: number;
+    size: number;  // Renamed from quantity
+    leverage: number;
+    current_pnl: number;
+    current_pnl_pct: number;
     stop_loss: number;
-    take_profit: number;
-    open_time: string;
+    take_profits: number[];  // Array of TP1, TP2, TP3
+    entry_time: string;  // ISO timestamp
+    // Legacy fields for backward compatibility
+    quantity?: number;
+    margin?: number;
+    take_profit?: number;
+    open_time?: string;
     unrealized_pnl?: number;
 }
 
+// Pending order interface
+interface PendingOrder {
+    id: string;
+    signal_id: string;
+    symbol: string;
+    side: 'LONG' | 'SHORT';
+    entry_price: number;
+    size: number;
+    stop_loss: number;
+    take_profits: number[];
+    created_at: string;
+    expires_at: string;
+    ttl_seconds: number;
+}
+
+// Portfolio data aligned with backend
 interface PortfolioData {
-    balance: number;
-    equity: number;
+    wallet_balance: number;
+    margin_balance: number;
+    available_balance: number;
     unrealized_pnl: number;
-    realized_pnl: number;
+    total_equity: number;
     open_positions: Position[];
+    pending_orders: PendingOrder[];
+    // Legacy fields
+    balance?: number;
+    equity?: number;
+    realized_pnl?: number;
 }
 
 /**
@@ -32,7 +62,7 @@ const Portfolio: React.FC = () => {
     const [portfolio, setPortfolio] = useState<PortfolioData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    
+
     const { data: marketData } = useMarketData('btcusdt');
     const currentPrice = marketData?.close || 0;
 
@@ -58,10 +88,14 @@ const Portfolio: React.FC = () => {
 
     const calculatePositionPnL = (position: Position): number => {
         if (currentPrice <= 0) return 0;
+        // Use size (new) with fallback to quantity (legacy)
+        const positionSize = position.size || position.quantity || 0;
+        // Use current_pnl from backend if available, otherwise calculate
+        if (position.current_pnl !== undefined) return position.current_pnl;
         if (position.side === 'LONG') {
-            return (currentPrice - position.entry_price) * position.quantity;
+            return (currentPrice - position.entry_price) * positionSize;
         }
-        return (position.entry_price - currentPrice) * position.quantity;
+        return (position.entry_price - currentPrice) * positionSize;
     };
 
     const handleClosePosition = async (positionId: string) => {
@@ -158,12 +192,12 @@ const Portfolio: React.FC = () => {
             {/* Header */}
             <div style={headerStyle}>
                 <h2 style={{ fontSize: '18px', fontWeight: 700, color: THEME.text.primary, margin: 0 }}>Portfolio</h2>
-                <span style={{ 
-                    fontSize: '12px', 
-                    padding: '4px 8px', 
-                    borderRadius: '4px', 
-                    backgroundColor: THEME.alpha.warningBg, 
-                    color: THEME.accent.yellow 
+                <span style={{
+                    fontSize: '12px',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    backgroundColor: THEME.alpha.warningBg,
+                    color: THEME.accent.yellow
                 }}>
                     Paper Trading
                 </span>
@@ -185,20 +219,20 @@ const Portfolio: React.FC = () => {
             <div style={gridStyle}>
                 <div style={cardStyle}>
                     <div style={labelStyle}>Lãi/Lỗ chưa thực hiện</div>
-                    <div style={{ 
-                        ...valueStyle, 
+                    <div style={{
+                        ...valueStyle,
                         fontSize: '18px',
-                        color: totalUnrealizedPnL >= 0 ? THEME.status.buy : THEME.status.sell 
+                        color: totalUnrealizedPnL >= 0 ? THEME.status.buy : THEME.status.sell
                     }}>
                         {totalUnrealizedPnL >= 0 ? '+' : ''}{formatPrice(totalUnrealizedPnL)}
                     </div>
                 </div>
                 <div style={cardStyle}>
                     <div style={labelStyle}>Lãi/Lỗ đã thực hiện</div>
-                    <div style={{ 
-                        ...valueStyle, 
+                    <div style={{
+                        ...valueStyle,
                         fontSize: '18px',
-                        color: (portfolio?.realized_pnl || 0) >= 0 ? THEME.status.buy : THEME.status.sell 
+                        color: (portfolio?.realized_pnl || 0) >= 0 ? THEME.status.buy : THEME.status.sell
                     }}>
                         {(portfolio?.realized_pnl || 0) >= 0 ? '+' : ''}{formatPrice(portfolio?.realized_pnl || 0)}
                     </div>
@@ -216,14 +250,14 @@ const Portfolio: React.FC = () => {
                         {(portfolio?.open_positions.length || 0) > 0 && (
                             <button
                                 onClick={handleCloseAll}
-                                style={{ 
+                                style={{
                                     fontSize: '12px',
                                     padding: '4px 12px',
                                     borderRadius: '4px',
                                     fontWeight: 700,
                                     border: 'none',
                                     cursor: 'pointer',
-                                    backgroundColor: THEME.status.sell, 
+                                    backgroundColor: THEME.status.sell,
                                     color: '#fff',
                                     boxShadow: '0 2px 8px rgba(246, 70, 93, 0.4)'
                                 }}
@@ -242,12 +276,14 @@ const Portfolio: React.FC = () => {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '256px', overflowY: 'auto' }}>
                         {portfolio?.open_positions.map((position) => {
                             const pnl = calculatePositionPnL(position);
-                            const pnlPercent = position.margin > 0 ? (pnl / position.margin) * 100 : 0;
-                            
+                            // Use current_pnl_pct if available, else calculate from margin
+                            const positionMargin = position.margin || (position.entry_price * (position.size || position.quantity || 0));
+                            const pnlPercent = position.current_pnl_pct ?? (positionMargin > 0 ? (pnl / positionMargin) * 100 : 0);
+
                             return (
-                                <div key={position.id} style={{ 
-                                    ...cardStyle, 
-                                    border: `1px solid ${THEME.border.primary}` 
+                                <div key={position.id} style={{
+                                    ...cardStyle,
+                                    border: `1px solid ${THEME.border.primary}`
                                 }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -263,7 +299,7 @@ const Portfolio: React.FC = () => {
                                             </span>
                                             <span style={{ fontWeight: 600, color: THEME.text.primary }}>{position.symbol}</span>
                                         </div>
-                                        <button 
+                                        <button
                                             onClick={() => handleClosePosition(position.id)}
                                             style={{
                                                 fontSize: '12px',
@@ -278,7 +314,7 @@ const Portfolio: React.FC = () => {
                                             Đóng
                                         </button>
                                     </div>
-                                    
+
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '12px' }}>
                                         <div>
                                             <span style={{ color: THEME.text.tertiary }}>Entry</span>
@@ -286,7 +322,7 @@ const Portfolio: React.FC = () => {
                                         </div>
                                         <div>
                                             <span style={{ color: THEME.text.tertiary }}>Size</span>
-                                            <div style={{ fontFamily: 'monospace', color: THEME.text.primary }}>{position.quantity.toFixed(4)}</div>
+                                            <div style={{ fontFamily: 'monospace', color: THEME.text.primary }}>{(position.size || position.quantity || 0).toFixed(4)}</div>
                                         </div>
                                         <div>
                                             <span style={{ color: THEME.text.tertiary }}>P&L</span>
@@ -296,23 +332,41 @@ const Portfolio: React.FC = () => {
                                         </div>
                                     </div>
 
-                                    <div style={{ 
-                                        display: 'grid', 
-                                        gridTemplateColumns: '1fr 1fr', 
-                                        gap: '8px', 
-                                        fontSize: '12px', 
-                                        marginTop: '8px', 
-                                        paddingTop: '8px', 
-                                        borderTop: `1px solid ${THEME.border.primary}` 
+                                    {/* Entry Time */}
+                                    {(position.entry_time || position.open_time) && (
+                                        <div style={{ fontSize: '11px', color: THEME.text.tertiary, marginTop: '4px' }}>
+                                            📅 Opened: {new Date(position.entry_time || position.open_time || '').toLocaleString('vi-VN')}
+                                        </div>
+                                    )}
+
+                                    {/* SL/TP Levels */}
+                                    <div style={{
+                                        display: 'flex',
+                                        flexWrap: 'wrap',
+                                        gap: '12px',
+                                        fontSize: '12px',
+                                        marginTop: '8px',
+                                        paddingTop: '8px',
+                                        borderTop: `1px solid ${THEME.border.primary}`
                                     }}>
                                         <div>
                                             <span style={{ color: THEME.text.tertiary }}>SL</span>
-                                            <span style={{ fontFamily: 'monospace', marginLeft: '8px', color: THEME.status.sell }}>${formatPrice(position.stop_loss)}</span>
+                                            <span style={{ fontFamily: 'monospace', marginLeft: '4px', color: THEME.status.sell }}>${formatPrice(position.stop_loss)}</span>
                                         </div>
-                                        <div>
-                                            <span style={{ color: THEME.text.tertiary }}>TP</span>
-                                            <span style={{ fontFamily: 'monospace', marginLeft: '8px', color: THEME.status.buy }}>${formatPrice(position.take_profit)}</span>
-                                        </div>
+                                        {/* TP Levels - use take_profits array or fallback to single take_profit */}
+                                        {position.take_profits && position.take_profits.length > 0 ? (
+                                            position.take_profits.map((tp, idx) => (
+                                                <div key={idx}>
+                                                    <span style={{ color: THEME.text.tertiary }}>TP{idx + 1}</span>
+                                                    <span style={{ fontFamily: 'monospace', marginLeft: '4px', color: THEME.status.buy }}>${formatPrice(tp)}</span>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div>
+                                                <span style={{ color: THEME.text.tertiary }}>TP</span>
+                                                <span style={{ fontFamily: 'monospace', marginLeft: '4px', color: THEME.status.buy }}>${formatPrice(position.take_profit || 0)}</span>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             );
@@ -320,8 +374,95 @@ const Portfolio: React.FC = () => {
                     </div>
                 )}
             </div>
+
+            {/* Pending Orders Section */}
+            {(portfolio?.pending_orders?.length || 0) > 0 && (
+                <div style={{ marginTop: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <h3 style={{ fontSize: '14px', fontWeight: 600, color: THEME.text.secondary, margin: 0 }}>
+                            ⏳ Lệnh Chờ Khớp
+                        </h3>
+                        <span style={{ fontSize: '12px', color: THEME.accent.yellow }}>
+                            {portfolio?.pending_orders?.length || 0} lệnh
+                        </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {portfolio?.pending_orders?.map((order) => (
+                            <div key={order.id} style={{
+                                ...cardStyle,
+                                border: `1px solid ${THEME.accent.yellow}40`,
+                                backgroundColor: 'rgba(240, 185, 11, 0.05)'
+                            }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <span style={{
+                                            padding: '2px 8px',
+                                            borderRadius: '4px',
+                                            fontSize: '12px',
+                                            fontWeight: 700,
+                                            backgroundColor: order.side === 'LONG' ? THEME.alpha.buyBg : THEME.alpha.sellBg,
+                                            color: order.side === 'LONG' ? THEME.status.buy : THEME.status.sell
+                                        }}>
+                                            {order.side === 'LONG' ? 'MUA' : 'BÁN'}
+                                        </span>
+                                        <span style={{ fontWeight: 600, color: THEME.text.primary }}>{order.symbol}</span>
+                                        <span style={{
+                                            fontSize: '10px',
+                                            padding: '2px 6px',
+                                            borderRadius: '4px',
+                                            backgroundColor: THEME.accent.yellow,
+                                            color: '#000',
+                                            fontWeight: 600,
+                                        }}>
+                                            PENDING
+                                        </span>
+                                    </div>
+                                    <button
+                                        onClick={() => {/* TODO: Cancel order API */ }}
+                                        style={{
+                                            fontSize: '11px',
+                                            padding: '3px 8px',
+                                            borderRadius: '4px',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            backgroundColor: THEME.bg.vessel,
+                                            color: THEME.text.tertiary
+                                        }}
+                                    >
+                                        Hủy
+                                    </button>
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '12px' }}>
+                                    <div>
+                                        <span style={{ color: THEME.text.tertiary }}>Entry</span>
+                                        <div style={{ fontFamily: 'monospace', color: THEME.accent.yellow }}>${formatPrice(order.entry_price)}</div>
+                                    </div>
+                                    <div>
+                                        <span style={{ color: THEME.text.tertiary }}>Size</span>
+                                        <div style={{ fontFamily: 'monospace', color: THEME.text.primary }}>{order.size.toFixed(4)}</div>
+                                    </div>
+                                    <div>
+                                        <span style={{ color: THEME.text.tertiary }}>TTL</span>
+                                        <div style={{ fontFamily: 'monospace', color: THEME.accent.yellow }}>
+                                            {Math.floor((order.ttl_seconds || 0) / 60)}m {(order.ttl_seconds || 0) % 60}s
+                                        </div>
+                                    </div>
+                                </div>
+                                {/* SL/TP for pending order */}
+                                <div style={{ display: 'flex', gap: '16px', fontSize: '11px', marginTop: '6px', color: THEME.text.tertiary }}>
+                                    <span>SL: <span style={{ color: THEME.status.sell }}>${formatPrice(order.stop_loss)}</span></span>
+                                    {order.take_profits && order.take_profits.length > 0 && (
+                                        <span>TP1: <span style={{ color: THEME.status.buy }}>${formatPrice(order.take_profits[0])}</span></span>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
 
 export default Portfolio;
+

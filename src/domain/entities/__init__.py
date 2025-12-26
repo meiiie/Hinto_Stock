@@ -7,6 +7,7 @@ from .enhanced_signal import EnhancedSignal, TPLevels
 from .paper_position import PaperPosition
 from .portfolio import Portfolio
 from .performance_metrics import PerformanceMetrics
+from .exchange_models import Position, OrderStatus
 
 __all__ = [
     'Candle', 
@@ -16,5 +17,7 @@ __all__ = [
     'TPLevels',
     'PaperPosition',
     'Portfolio',
-    'PerformanceMetrics'
+    'PerformanceMetrics',
+    'Position',
+    'OrderStatus',
 ]

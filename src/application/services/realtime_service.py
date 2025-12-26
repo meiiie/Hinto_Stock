@@ -29,6 +29,9 @@ from ...domain.interfaces import (
     IVolumeSpikeDetector,
 )
 
+# Domain repository interface (for candle persistence - Phase 2)
+from ...domain.repositories.market_data_repository import MarketDataRepository
+
 # Application imports (allowed)
 from ..analysis import VolumeAnalyzer, RSIMonitor
 from ..signals import SignalGenerator, TradingSignal
@@ -73,6 +76,8 @@ class RealtimeService:
         atr_calculator: Optional[IATRCalculator] = None,
         volume_spike_detector: Optional[IVolumeSpikeDetector] = None,
         signal_generator: Optional[SignalGenerator] = None,
+        # SOTA FIX: Market data repository for candle persistence (Phase 2)
+        market_data_repository: Optional[MarketDataRepository] = None,
     ):
         """
         Initialize real-time service with dependency injection.
@@ -128,6 +133,9 @@ class RealtimeService:
         # Signal generator (injected or will be set later)
         self.signal_generator = signal_generator
         
+        # SOTA FIX: Market data repository for candle persistence (Phase 2)
+        self._market_data_repository = market_data_repository
+        
         # Data storage (in-memory cache)
         self._latest_1m: Optional[Candle] = None
         self._latest_15m: Optional[Candle] = None
@@ -146,8 +154,23 @@ class RealtimeService:
         # State
         self._is_running = False
         
+        # EventBus for broadcasting events (set via set_event_bus)
+        self._event_bus = None
+        
         # Logging
         self.logger = logging.getLogger(__name__)
+    
+    def set_event_bus(self, event_bus) -> None:
+        """
+        Set the EventBus for broadcasting events.
+        
+        Called by main.py during startup to connect RealtimeService to EventBus.
+        
+        Args:
+            event_bus: EventBus instance for broadcasting
+        """
+        self._event_bus = event_bus
+        self.logger.info("✅ EventBus connected to RealtimeService")
     
     async def start(self) -> None:
         """
@@ -175,10 +198,12 @@ class RealtimeService:
             self.aggregator.on_15m_complete(self._on_15m_complete)
             self.aggregator.on_1h_complete(self._on_1h_complete)
             
-            # Connect to WebSocket
+            # Connect to WebSocket with MULTI-STREAM for all timeframes
+            # SOTA: Binance Combined Stream gives native 15m/1h candles
             await self.websocket_client.connect(
                 symbol=self.symbol,
-                interval=self.interval
+                interval=self.interval,  # Legacy (1m)
+                intervals=['1m', '15m', '1h']  # SOTA: Multi-stream
             )
             
             self._is_running = True
@@ -186,80 +211,155 @@ class RealtimeService:
             
         except Exception as e:
             self.logger.error(f"Failed to start service: {e}")
-            raise
     
+    def _load_candles_hybrid(self, timeframe: str, limit: int = 100) -> List[Candle]:
+        """
+        SOTA Hybrid Data Layer: Load candles from SQLite first, Binance fallback.
+        
+        Pattern: Read-through cache
+        - L1: In-memory (populated by this method)
+        - L2: SQLite (check first)
+        - L3: Binance API (fallback + write-through)
+        
+        Args:
+            timeframe: '1m', '15m', or '1h'
+            limit: Number of candles to load
+            
+        Returns:
+            List of Candle objects, sorted by timestamp ascending
+        """
+        local_candles = []
+        
+        # Step 1: Try SQLite first (L2 cache)
+        if self._market_data_repository:
+            try:
+                market_data_list = self._market_data_repository.get_latest_candles(
+                    timeframe, limit
+                )
+                local_candles = [md.candle for md in market_data_list]
+                # Sort ascending (oldest first) - SQLite returns DESC
+                local_candles = sorted(local_candles, key=lambda c: c.timestamp)
+                
+                if local_candles:
+                    self.logger.info(f"📦 SQLite HIT: {len(local_candles)}/{limit} {timeframe} candles")
+            except Exception as e:
+                self.logger.warning(f"⚠️ SQLite read failed for {timeframe}: {e}")
+        
+        # Step 2: Check if we have enough data (80% threshold)
+        threshold = int(limit * 0.8)
+        if len(local_candles) >= threshold:
+            return local_candles
+        
+        # Step 3: SQLite miss - fetch from Binance (L3)
+        self.logger.info(f"📡 SQLite MISS for {timeframe} ({len(local_candles)}/{limit}), fetching from Binance...")
+        
+        try:
+            external_candles = self.rest_client.get_klines(
+                symbol=self.symbol,
+                interval=timeframe,
+                limit=limit
+            )
+            
+            if not external_candles:
+                self.logger.warning(f"No external data for {timeframe}")
+                return local_candles  # Return whatever we have
+            
+            # Step 4: Merge local + external, deduplicate by timestamp
+            merged = self._merge_candles(local_candles, external_candles)
+            
+            # Step 5: Write-through - save new candles to SQLite
+            if self._market_data_repository:
+                local_timestamps = {c.timestamp for c in local_candles}
+                new_candles = [c for c in merged if c.timestamp not in local_timestamps]
+                
+                if new_candles:
+                    self.logger.info(f"💾 Write-through: Saving {len(new_candles)} new {timeframe} candles to SQLite")
+                    for candle in new_candles:
+                        try:
+                            self._market_data_repository.save_candle_simple(candle, timeframe)
+                        except Exception as e:
+                            self.logger.error(f"Failed to save candle: {e}")
+            
+            return merged
+            
+        except Exception as e:
+            self.logger.error(f"Binance fetch failed for {timeframe}: {e}")
+            return local_candles  # Return whatever we have from SQLite
+    
+    def _merge_candles(self, local: List[Candle], external: List[Candle]) -> List[Candle]:
+        """
+        Merge local and external candles, deduplicate by timestamp.
+        
+        Priority: External (source of truth) for conflicts
+        """
+        # Create map by timestamp, external overwrites local
+        candle_map = {}
+        
+        for candle in local:
+            candle_map[candle.timestamp] = candle
+        
+        for candle in external:
+            candle_map[candle.timestamp] = candle  # Overwrites if exists
+        
+        # Sort by timestamp ascending
+        merged = sorted(candle_map.values(), key=lambda c: c.timestamp)
+        return merged
+
     async def _load_historical_data(self) -> None:
         """
-        Load historical candles from Binance REST API.
+        SOTA Hybrid Load: SQLite first, Binance fallback.
         
         This populates the buffer with recent candles so the dashboard
         shows data immediately instead of waiting for the first candle to close.
+        
+        Architecture:
+        - L1: In-memory deques (fastest, volatile)
+        - L2: SQLite (fast, persistent)
+        - L3: Binance REST API (slow, source of truth)
+        
+        Note: Load 500 candles to satisfy frontend requirement (400 + 50 warm-up + buffer)
         """
         try:
-            self.logger.info("Fetching historical candles...")
+            self.logger.info("🚀 Loading historical candles (SOTA Hybrid)...")
             
-            # 1. Fetch last 100 1m candles
-            candles_1m = self.rest_client.get_klines(
-                symbol=self.symbol,
-                interval=self.interval,
-                limit=100
-            )
+            # SOTA: Load 500 candles for professional chart display
+            # Frontend requests 400, plus 50 warm-up trim = 450 minimum
+            CANDLE_LOAD_LIMIT = 500
             
+            # 1. Load 1m candles
+            candles_1m = self._load_candles_hybrid('1m', CANDLE_LOAD_LIMIT)
             if candles_1m:
-                self.logger.info(f"Loaded {len(candles_1m)} historical 1m candles")
-                # Add to buffer and aggregator
                 for candle in candles_1m:
                     self._candles_1m.append(candle)
-                    # Feed to aggregator to initialize its state
                     self.aggregator.add_candle_1m(candle, is_closed=True)
-                
-                # Update latest 1m
                 self._latest_1m = candles_1m[-1]
+                self.logger.info(f"✅ Loaded {len(candles_1m)} 1m candles")
             else:
-                self.logger.warning("No historical 1m data fetched")
-
-            # 2. Fetch last 100 15m candles
-            candles_15m = self.rest_client.get_klines(
-                symbol=self.symbol,
-                interval='15m',
-                limit=100
-            )
+                self.logger.warning("No 1m data available")
             
+            # 2. Load 15m candles (exclude last = incomplete)
+            candles_15m = self._load_candles_hybrid('15m', CANDLE_LOAD_LIMIT)
             if candles_15m and len(candles_15m) > 1:
-                # Exclude the last candle as it is likely incomplete (still open)
-                completed_15m = candles_15m[:-1]
-                self.logger.info(f"Loaded {len(completed_15m)} historical 15m candles")
-                
+                completed_15m = candles_15m[:-1]  # Exclude incomplete
                 for candle in completed_15m:
                     self._candles_15m.append(candle)
-                
-                # Update latest 15m (last completed)
                 self._latest_15m = completed_15m[-1]
+                self.logger.info(f"✅ Loaded {len(completed_15m)} 15m candles")
             
-            # 3. Fetch last 100 1h candles
-            candles_1h = self.rest_client.get_klines(
-                symbol=self.symbol,
-                interval='1h',
-                limit=100
-            )
-            
+            # 3. Load 1h candles (exclude last = incomplete)
+            candles_1h = self._load_candles_hybrid('1h', CANDLE_LOAD_LIMIT)
             if candles_1h and len(candles_1h) > 1:
-                # Exclude the last candle as it is likely incomplete
                 completed_1h = candles_1h[:-1]
-                self.logger.info(f"Loaded {len(completed_1h)} historical 1h candles")
-                
                 for candle in completed_1h:
                     self._candles_1h.append(candle)
-                
-                # Update latest 1h (last completed)
                 self._latest_1h = completed_1h[-1]
+                self.logger.info(f"✅ Loaded {len(completed_1h)} 1h candles")
             
-            self.logger.info(f"✅ Historical data loaded successfully")
+            self.logger.info("✅ Historical data loaded successfully (SOTA Hybrid)")
             
         except Exception as e:
             self.logger.error(f"Error loading historical data: {e}")
             # Don't fail - continue with WebSocket streaming
-
     
     async def stop(self) -> None:
         """
@@ -288,15 +388,29 @@ class RealtimeService:
     
     def _on_candle_received(self, candle: Candle, metadata: Dict) -> None:
         """
-        Callback when new 1m candle is received from WebSocket.
+        Callback when candle is received from WebSocket.
+        
+        SOTA: With multi-stream, this receives 1m, 15m, AND 1h candles.
+        Route based on metadata.interval.
         
         Args:
             candle: Candle entity
-            metadata: Metadata (is_closed, symbol, etc.)
+            metadata: Metadata (is_closed, symbol, interval, etc.)
         """
-        self.logger.info(f"🕯️ _on_candle_received: {candle.close:.2f}")
+        interval = metadata.get('interval', '1m')
         is_closed = metadata.get('is_closed', False)
         
+        self.logger.info(f"🕯️ [{interval}] Candle: {candle.close:.2f} closed={is_closed}")
+        
+        # SOTA Multi-Stream Routing
+        if interval == '15m':
+            self._handle_15m_candle(candle, is_closed)
+            return
+        elif interval == '1h':
+            self._handle_1h_candle(candle, is_closed)
+            return
+        
+        # Default: 1m candle processing (original logic)
         # Check if this is a NEW candle (different timestamp from current latest)
         if self._latest_1m and candle.timestamp != self._latest_1m.timestamp:
             # New candle started - the previous one is now complete
@@ -312,6 +426,25 @@ class RealtimeService:
         
         # Always update latest 1m candle (for real-time display)
         self._latest_1m = candle
+        
+        # SOTA FIX: Broadcast candle update via EventBus to frontend WebSocket
+        if self._event_bus:
+            # Get latest indicators for the candle
+            indicators = self.get_latest_indicators('1m')
+            candle_data = {
+                'open': candle.open,
+                'high': candle.high, 
+                'low': candle.low,
+                'close': candle.close,
+                'volume': candle.volume,
+                'timestamp': candle.timestamp.isoformat() if hasattr(candle.timestamp, 'isoformat') else str(candle.timestamp),
+                'time': int(candle.timestamp.timestamp()) if hasattr(candle.timestamp, 'timestamp') else 0,
+                'vwap': indicators.get('vwap'),
+                'bollinger': indicators.get('bollinger'),
+                'rsi': indicators.get('rsi'),
+            }
+            self._event_bus.publish_candle_update(candle_data, symbol=self.symbol)
+            self.logger.debug(f"📡 EventBus: Published 1m candle {candle.close:.2f}")
         
         # Paper Engine Matching (Run on every tick/candle update)
         if self.paper_service:
@@ -337,6 +470,86 @@ class RealtimeService:
         self.logger.info(f"📢 Calling _notify_update_callbacks with {len(self._update_callbacks)} callbacks")
         self._notify_update_callbacks()
     
+    def _handle_15m_candle(self, candle: Candle, is_closed: bool) -> None:
+        """
+        SOTA Multi-Stream: Handle 15m candle from Binance combined stream.
+        
+        This receives NATIVE 15m candles directly from Binance WebSocket.
+        Broadcasts to frontend for realtime chart updates.
+        
+        Args:
+            candle: 15m Candle entity
+            is_closed: Whether candle is closed
+        """
+        # Update latest 15m candle
+        self._latest_15m = candle
+        
+        # If closed, add to buffer and persist
+        if is_closed:
+            self._candles_15m.append(candle)
+            
+            # Persist to SQLite
+            if self._market_data_repository:
+                try:
+                    self._market_data_repository.save_candle_simple(candle, '15m')
+                    self.logger.debug(f"📦 Persisted 15m candle from stream: {candle.timestamp}")
+                except Exception as e:
+                    self.logger.error(f"Failed to persist 15m candle: {e}")
+        
+        # Broadcast to frontend (both forming and closed candles)
+        if self._event_bus:
+            candle_data = {
+                'open': candle.open,
+                'high': candle.high,
+                'low': candle.low,
+                'close': candle.close,
+                'volume': candle.volume,
+                'timestamp': candle.timestamp.isoformat() if hasattr(candle.timestamp, 'isoformat') else str(candle.timestamp),
+                'time': int(candle.timestamp.timestamp()) if hasattr(candle.timestamp, 'timestamp') else 0,
+            }
+            self._event_bus.publish_candle_15m(candle_data, symbol=self.symbol)
+            self.logger.debug(f"📡 EventBus: Published 15m candle {candle.close:.2f} (closed={is_closed})")
+    
+    def _handle_1h_candle(self, candle: Candle, is_closed: bool) -> None:
+        """
+        SOTA Multi-Stream: Handle 1h candle from Binance combined stream.
+        
+        This receives NATIVE 1h candles directly from Binance WebSocket.
+        Broadcasts to frontend for realtime chart updates.
+        
+        Args:
+            candle: 1h Candle entity
+            is_closed: Whether candle is closed
+        """
+        # Update latest 1h candle
+        self._latest_1h = candle
+        
+        # If closed, add to buffer and persist
+        if is_closed:
+            self._candles_1h.append(candle)
+            
+            # Persist to SQLite
+            if self._market_data_repository:
+                try:
+                    self._market_data_repository.save_candle_simple(candle, '1h')
+                    self.logger.debug(f"📦 Persisted 1h candle from stream: {candle.timestamp}")
+                except Exception as e:
+                    self.logger.error(f"Failed to persist 1h candle: {e}")
+        
+        # Broadcast to frontend (both forming and closed candles)
+        if self._event_bus:
+            candle_data = {
+                'open': candle.open,
+                'high': candle.high,
+                'low': candle.low,
+                'close': candle.close,
+                'volume': candle.volume,
+                'timestamp': candle.timestamp.isoformat() if hasattr(candle.timestamp, 'isoformat') else str(candle.timestamp),
+                'time': int(candle.timestamp.timestamp()) if hasattr(candle.timestamp, 'timestamp') else 0,
+            }
+            self._event_bus.publish_candle_1h(candle_data, symbol=self.symbol)
+            self.logger.debug(f"📡 EventBus: Published 1h candle {candle.close:.2f} (closed={is_closed})")
+    
     def _on_15m_complete(self, candle: Candle) -> None:
         """
         Callback when 15m candle is completed.
@@ -348,6 +561,28 @@ class RealtimeService:
         
         self._latest_15m = candle
         self._candles_15m.append(candle)
+        
+        # SOTA FIX: Persist closed 15m candles to SQLite (Phase 2)
+        if self._market_data_repository:
+            try:
+                self._market_data_repository.save_candle_simple(candle, '15m')
+                self.logger.debug(f"📦 Persisted 15m candle: {candle.timestamp}")
+            except Exception as e:
+                self.logger.error(f"Failed to persist 15m candle: {e}")
+        
+        # SOTA FIX: Broadcast 15m candle via EventBus to frontend
+        if self._event_bus:
+            candle_data = {
+                'open': candle.open,
+                'high': candle.high,
+                'low': candle.low,
+                'close': candle.close,
+                'volume': candle.volume,
+                'timestamp': candle.timestamp.isoformat() if hasattr(candle.timestamp, 'isoformat') else str(candle.timestamp),
+                'time': int(candle.timestamp.timestamp()) if hasattr(candle.timestamp, 'timestamp') else 0,
+            }
+            self._event_bus.publish_candle_15m(candle_data, symbol=self.symbol)
+            self.logger.debug(f"📡 EventBus: Published 15m candle {candle.close:.2f}")
         
         # Generate signals on 15m timeframe
         if len(self._candles_15m) >= 20:
@@ -364,6 +599,28 @@ class RealtimeService:
         
         self._latest_1h = candle
         self._candles_1h.append(candle)
+        
+        # SOTA FIX: Persist closed 1h candles to SQLite (Phase 2)
+        if self._market_data_repository:
+            try:
+                self._market_data_repository.save_candle_simple(candle, '1h')
+                self.logger.debug(f"📦 Persisted 1h candle: {candle.timestamp}")
+            except Exception as e:
+                self.logger.error(f"Failed to persist 1h candle: {e}")
+        
+        # SOTA FIX: Broadcast 1h candle via EventBus to frontend
+        if self._event_bus:
+            candle_data = {
+                'open': candle.open,
+                'high': candle.high,
+                'low': candle.low,
+                'close': candle.close,
+                'volume': candle.volume,
+                'timestamp': candle.timestamp.isoformat() if hasattr(candle.timestamp, 'isoformat') else str(candle.timestamp),
+                'time': int(candle.timestamp.timestamp()) if hasattr(candle.timestamp, 'timestamp') else 0,
+            }
+            self._event_bus.publish_candle_1h(candle_data, symbol=self.symbol)
+            self.logger.debug(f"📡 EventBus: Published 1h candle {candle.close:.2f}")
         
         # Generate signals on 1h timeframe
         if len(self._candles_1h) >= 20:
@@ -603,18 +860,29 @@ class RealtimeService:
             self.logger.error(f"Error calculating indicators: {e}")
             return {}
 
-    def get_historical_data_with_indicators(self, timeframe: str = '1m', limit: int = 1000) -> List[Dict]:
+    def get_historical_data_with_indicators(
+        self, 
+        timeframe: str = '1m', 
+        limit: int = 1000,
+        candles: Optional[List[Candle]] = None
+    ) -> List[Dict]:
         """
         Get historical candles with calculated indicators.
+        
+        SOTA: Accepts optional pre-loaded candles (e.g., from SQLite) to calculate
+        indicators without fetching from buffer or API.
         
         Args:
             timeframe: '1m', '15m', or '1h'
             limit: Number of candles
+            candles: Optional pre-loaded candle list (for SQLite data)
             
         Returns:
             List of dicts with candle data and indicators
         """
-        candles = self.get_candles(timeframe, limit=limit)
+        # Use provided candles or fetch from buffer
+        if candles is None:
+            candles = self.get_candles(timeframe, limit=limit)
         
         # Append current forming candle if available (for 1m)
         if timeframe == '1m' and self._latest_1m:
@@ -647,7 +915,9 @@ class RealtimeService:
                 # Handle VWAP - can be Series or scalar
                 if vwap_series is not None:
                     try:
-                        vwap_val = float(vwap_series.iloc[i]) if hasattr(vwap_series, 'iloc') else float(vwap_series)
+                        val = vwap_series.iloc[i] if hasattr(vwap_series, 'iloc') else vwap_series
+                        # SOTA: Explicit NaN check
+                        vwap_val = float(val) if not pd.isna(val) else 0.0
                     except (IndexError, TypeError):
                         vwap_val = 0.0
                 else:

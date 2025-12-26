@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { 
-    createChart, 
-    ColorType, 
-    IChartApi, 
-    ISeriesApi, 
-    Time, 
-    CandlestickSeries, 
+import {
+    createChart,
+    ColorType,
+    IChartApi,
+    ISeriesApi,
+    Time,
+    CandlestickSeries,
     LineSeries,
     HistogramSeries,
     CrosshairMode,
@@ -14,6 +14,12 @@ import {
     SeriesMarker
 } from 'lightweight-charts';
 import { useMarketData } from '../hooks/useMarketData';
+import { apiUrl, ENDPOINTS } from '../config/api';
+
+// Shared utilities - exported for use in other chart components
+// Note: Local definitions kept below for now to avoid breaking changes
+export { CHART_COLORS, type Timeframe, type ChartData as SharedChartData } from '../utils/chartConstants';
+export { toVietnamTime as sharedToVietnamTime, formatPrice as sharedFormatPrice } from '../utils/chartUtils';
 
 // Position interface for price lines
 interface OpenPosition {
@@ -90,6 +96,30 @@ const toVietnamTime = (utcTimestamp: number): Time => {
     return (utcTimestamp + VN_TIMEZONE_OFFSET) as Time;
 };
 
+/**
+ * Safely parse any timestamp format to Unix seconds
+ * Handles: ISO string, Date object, milliseconds, or seconds
+ * @param timestamp - unknown format timestamp
+ * @returns Unix timestamp in seconds, or 0 if invalid
+ */
+const safeParseTimestamp = (timestamp: unknown): number => {
+    if (timestamp === null || timestamp === undefined) return 0;
+
+    // Already a number
+    if (typeof timestamp === 'number') {
+        // Check if milliseconds (> year 2001 in ms) vs seconds
+        return timestamp > 1_000_000_000_000 ? Math.floor(timestamp / 1000) : timestamp;
+    }
+
+    // ISO string or Date object
+    if (typeof timestamp === 'string' || timestamp instanceof Date) {
+        const ms = new Date(timestamp).getTime();
+        return isNaN(ms) ? 0 : Math.floor(ms / 1000);
+    }
+
+    return 0;
+};
+
 
 
 /**
@@ -107,8 +137,19 @@ const formatPrice = (price: number): string => {
  * 
  * **Feature: desktop-trading-dashboard**
  * **Validates: Requirements 2.1, 2.3, 2.4, 3.1, 3.2, 3.3, 3.4**
+ * 
+ * Phase D: Accepts timeframe as controlled prop from App.tsx for price sync
  */
-const CandleChart: React.FC = () => {
+
+interface CandleChartProps {
+    timeframe?: Timeframe;
+    onTimeframeChange?: (tf: Timeframe) => void;
+}
+
+const CandleChart: React.FC<CandleChartProps> = ({
+    timeframe: propTimeframe,
+    onTimeframeChange
+}) => {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
 
@@ -118,17 +159,41 @@ const CandleChart: React.FC = () => {
     const vwapSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
     const bbUpperSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
     const bbLowerSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-    
+
     // Dynamic Price Lines for Open Positions (using createPriceLine API)
     const entryPriceLineRef = useRef<IPriceLine | null>(null);
     const slPriceLineRef = useRef<IPriceLine | null>(null);
     const tpPriceLineRef = useRef<IPriceLine | null>(null);
-    
+
+    // Track if chart is disposed to prevent updates on unmounted component
+    const isDisposedRef = useRef<boolean>(false);
+
+    // Track last time rendered to chart for chronological order validation (per-timeframe)
+    // SOTA FIX: Use per-timeframe tracking to prevent cross-contamination when switching
+    const lastRenderedTimeRef = useRef<Record<Timeframe, number>>({
+        '1m': 0,
+        '15m': 0,
+        '1h': 0
+    });
+
     // Open positions state for price lines
     const [openPositions, setOpenPositions] = useState<OpenPosition[]>([]);
 
-    const { data: realtimeData, signal: realtimeSignal } = useMarketData('btcusdt');
-    const [timeframe, setTimeframe] = useState<Timeframe>('15m');
+    const { data: realtimeData, data15m: realtimeData15m, data1h: realtimeData1h, signal: realtimeSignal } = useMarketData('btcusdt');
+
+    // Use prop timeframe if provided (controlled), otherwise internal state (uncontrolled)
+    const [internalTimeframe, setInternalTimeframe] = useState<Timeframe>('15m');
+    const timeframe = propTimeframe ?? internalTimeframe;
+
+    // Handle timeframe change - emit to parent if controlled
+    const handleTimeframeChange = (newTf: Timeframe) => {
+        if (onTimeframeChange) {
+            onTimeframeChange(newTf);
+        } else {
+            setInternalTimeframe(newTf);
+        }
+    };
+
     const [isLoading, setIsLoading] = useState(true);
     const [signals, setSignals] = useState<SignalMarker[]>([]);
     const [activeSignal, setActiveSignal] = useState<Signal | null>(null);
@@ -174,7 +239,7 @@ const CandleChart: React.FC = () => {
     // Fetch open positions for price lines
     const fetchOpenPositions = useCallback(async () => {
         try {
-            const response = await fetch('http://127.0.0.1:8000/trades/portfolio');
+            const response = await fetch(apiUrl(ENDPOINTS.PORTFOLIO));
             if (response.ok) {
                 const data = await response.json();
                 setOpenPositions(data.open_positions || []);
@@ -194,11 +259,11 @@ const CandleChart: React.FC = () => {
     // Fetch trade history for chart markers
     const fetchTradeHistory = useCallback(async () => {
         try {
-            const response = await fetch('http://127.0.0.1:8000/trades/history?limit=50');
+            const response = await fetch(apiUrl(ENDPOINTS.TRADE_HISTORY(1, 50)));
             if (response.ok) {
                 const data = await response.json();
                 const trades = data.trades || [];
-                
+
                 // Convert trades to signal markers
                 trades.forEach((trade: {
                     side: string;
@@ -215,11 +280,11 @@ const CandleChart: React.FC = () => {
                         stop_loss: trade.stop_loss || 0,
                         take_profit: trade.take_profit || 0,
                         confidence: 0.8,
-                        risk_reward_ratio: trade.take_profit && trade.stop_loss 
+                        risk_reward_ratio: trade.take_profit && trade.stop_loss
                             ? Math.abs(trade.take_profit - trade.entry_price) / Math.abs(trade.entry_price - trade.stop_loss)
                             : 2,
                         timestamp: trade.entry_time,
-                        reason: trade.pnl !== undefined 
+                        reason: trade.pnl !== undefined
                             ? `PnL: ${trade.pnl >= 0 ? '+' : ''}$${trade.pnl.toFixed(2)}`
                             : undefined
                     };
@@ -429,7 +494,7 @@ const CandleChart: React.FC = () => {
 
         const handleResize = () => {
             if (chartContainerRef.current && chartRef.current) {
-                chartRef.current.applyOptions({ 
+                chartRef.current.applyOptions({
                     width: chartContainerRef.current.clientWidth,
                     height: chartContainerRef.current.clientHeight || 400
                 });
@@ -437,21 +502,28 @@ const CandleChart: React.FC = () => {
         };
 
         window.addEventListener('resize', handleResize);
+        isDisposedRef.current = false;  // Mark chart as active
         return () => {
+            isDisposedRef.current = true;  // Mark chart as disposed
             window.removeEventListener('resize', handleResize);
             chart.remove();
         };
-    }, [signals]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);  // Chart init only once on mount - signals now handled separately
 
     // Load History when Timeframe Changes
     useEffect(() => {
         const fetchHistory = async () => {
             setIsLoading(true);
             currentCandleRef.current = null;
+            // SOTA FIX: Reset only the current timeframe's lastRenderedTimeRef
+            // This allows fresh data for this timeframe while preserving others
+            lastRenderedTimeRef.current[timeframe] = 0;
             setSignals([]);
 
             try {
-                const response = await fetch(`http://127.0.0.1:8000/ws/history/btcusdt?timeframe=${timeframe}`);
+                // Fetch 400 candles for technical analysis (SOTA standard)
+                const response = await fetch(apiUrl(ENDPOINTS.WS_HISTORY('btcusdt', timeframe, 400)));
                 if (!response.ok) throw new Error('Failed to fetch history');
 
                 const historyData: ChartData[] = await response.json();
@@ -459,13 +531,15 @@ const CandleChart: React.FC = () => {
                 if (historyData && historyData.length > 0) {
                     // TRIM DATA: Skip first 50 candles to eliminate indicator warm-up lag
                     // This ensures indicators (VWAP, BB) appear from the first visible candle
+                    // BUT only if we have enough data after trimming
                     const WARMUP_PERIOD = 50;
-                    const trimmedData = historyData.length > WARMUP_PERIOD 
-                        ? historyData.slice(WARMUP_PERIOD) 
-                        : historyData;
+                    const MIN_CANDLES_AFTER_TRIM = 20;
+                    const trimmedData = historyData.length > WARMUP_PERIOD + MIN_CANDLES_AFTER_TRIM
+                        ? historyData.slice(WARMUP_PERIOD)
+                        : historyData;  // Keep all if insufficient data
 
                     // Convert to Vietnam time
-                    const candles = trimmedData.map(d => ({
+                    const rawCandles = trimmedData.map(d => ({
                         time: toVietnamTime(d.time),
                         open: d.open,
                         high: d.high,
@@ -473,12 +547,21 @@ const CandleChart: React.FC = () => {
                         close: d.close,
                     }));
 
+                    // CRITICAL: Deduplicate by time - lightweight-charts requires strictly ascending
+                    const seenTimes = new Set<number>();
+                    const candles = rawCandles.filter(c => {
+                        const t = c.time as number;
+                        if (seenTimes.has(t)) return false;
+                        seenTimes.add(t);
+                        return true;
+                    });
+
                     // Volume data with reduced opacity (0.3) to not compete with price candles
                     const volumes = trimmedData.map(d => ({
                         time: toVietnamTime(d.time),
                         value: d.volume || 0,
-                        color: d.close >= d.open 
-                            ? 'rgba(46, 189, 133, 0.3)' 
+                        color: d.close >= d.open
+                            ? 'rgba(46, 189, 133, 0.3)'
                             : 'rgba(246, 70, 93, 0.3)',
                     }));
 
@@ -504,7 +587,7 @@ const CandleChart: React.FC = () => {
 
                     const lastCandle = trimmedData[trimmedData.length - 1];
                     const prevCandle = trimmedData[trimmedData.length - 2];
-                    
+
                     setCurrentPrice(lastCandle.close);
                     if (prevCandle) {
                         setPriceChange(lastCandle.close - prevCandle.close);
@@ -518,6 +601,11 @@ const CandleChart: React.FC = () => {
                         close: lastCandle.close,
                         volume: lastCandle.volume || 0
                     };
+
+                    // SOTA FIX: Initialize lastRenderedTimeRef to prevent "Cannot update oldest data" error
+                    const lastChartTime = toVietnamTime(lastCandle.time) as number;
+                    lastRenderedTimeRef.current[timeframe] = lastChartTime;
+                    console.log(`📊 Chart initialized for ${timeframe}: lastRenderedTime=${lastChartTime}`);
                 }
             } catch (err) {
                 console.error("Error loading chart history:", err);
@@ -532,7 +620,7 @@ const CandleChart: React.FC = () => {
     // Handle new signals from WebSocket
     useEffect(() => {
         if (!realtimeSignal) return;
-        const signalTime = realtimeSignal.timestamp 
+        const signalTime = realtimeSignal.timestamp
             ? Math.floor(new Date(realtimeSignal.timestamp).getTime() / 1000)
             : Math.floor(Date.now() / 1000);
         addSignalMarker(realtimeSignal, signalTime);
@@ -545,8 +633,8 @@ const CandleChart: React.FC = () => {
 
         // Limit markers for performance (max 100)
         const MAX_MARKERS = 100;
-        const limitedSignals = signals.length > MAX_MARKERS 
-            ? signals.slice(-MAX_MARKERS) 
+        const limitedSignals = signals.length > MAX_MARKERS
+            ? signals.slice(-MAX_MARKERS)
             : signals;
 
         // Convert SignalMarker to lightweight-charts marker format
@@ -574,16 +662,39 @@ const CandleChart: React.FC = () => {
     }, [signals]);
 
     // Aggregate Real-time Data with Vietnam timezone
+    // NOTE: Only applies to 1m timeframe - 15m/1h use historical data from API
     useEffect(() => {
-        if (!realtimeData || isLoading) return;
+        if (!realtimeData || isLoading || isDisposedRef.current) return;
+
+        // CRITICAL FIX: Skip realtime updates for 15m/1h timeframes
+        // WebSocket only streams 1m candles. Client-side aggregation to 15m/1h
+        // produces incorrect timestamps (multiple candles within same timeframe).
+        // For 15m/1h, rely on historical API data which is properly aggregated by backend.
+        if (timeframe !== '1m') {
+            return;
+        }
 
         try {
-            const time = (new Date(realtimeData.timestamp).getTime() / 1000);
-            let intervalSeconds = 60;
-            if (timeframe === '15m') intervalSeconds = 900;
-            if (timeframe === '1h') intervalSeconds = 3600;
+            // Use safeParseTimestamp for robust timestamp handling
+            const time = safeParseTimestamp(realtimeData.timestamp);
+            if (time <= 0) {
+                console.warn('Invalid timestamp in realtime data:', realtimeData.timestamp);
+                return;
+            }
+
+            // For 1m timeframe, interval is always 60 seconds
+            const intervalSeconds = 60;
 
             const candleStartTime = Math.floor(time / intervalSeconds) * intervalSeconds;
+            const chartTime = toVietnamTime(candleStartTime) as number;
+
+            // CRITICAL: Validate chronological order before update
+            // lightweight-charts requires: new_time >= last_rendered_time
+            // SOTA FIX: Use per-timeframe tracking
+            if (chartTime < lastRenderedTimeRef.current['1m']) {
+                // Skip stale data - would cause 'obsolete data' error
+                return;
+            }
 
             if (currentCandleRef.current && candleStartTime < currentCandleRef.current.time) {
                 return; // Skip old data
@@ -616,8 +727,8 @@ const CandleChart: React.FC = () => {
                     volumeSeriesRef.current.update({
                         time: toVietnamTime(candleStartTime),
                         value: updatedCandle.volume,
-                        color: updatedCandle.close >= updatedCandle.open 
-                            ? 'rgba(46, 189, 133, 0.5)' 
+                        color: updatedCandle.close >= updatedCandle.open
+                            ? 'rgba(46, 189, 133, 0.5)'
                             : 'rgba(246, 70, 93, 0.5)',
                     });
                 }
@@ -646,8 +757,8 @@ const CandleChart: React.FC = () => {
                     volumeSeriesRef.current.update({
                         time: toVietnamTime(candleStartTime),
                         value: newCandle.volume,
-                        color: newCandle.close >= newCandle.open 
-                            ? 'rgba(46, 189, 133, 0.5)' 
+                        color: newCandle.close >= newCandle.open
+                            ? 'rgba(46, 189, 133, 0.5)'
                             : 'rgba(246, 70, 93, 0.5)',
                     });
                 }
@@ -656,28 +767,113 @@ const CandleChart: React.FC = () => {
             // Update indicators for 1m timeframe
             if (timeframe === '1m') {
                 if (vwapSeriesRef.current && realtimeData.vwap) {
-                    vwapSeriesRef.current.update({ 
-                        time: toVietnamTime(candleStartTime), 
-                        value: realtimeData.vwap 
+                    vwapSeriesRef.current.update({
+                        time: toVietnamTime(candleStartTime),
+                        value: realtimeData.vwap
                     });
                 }
                 if (bbUpperSeriesRef.current && realtimeData.bollinger) {
-                    bbUpperSeriesRef.current.update({ 
-                        time: toVietnamTime(candleStartTime), 
-                        value: realtimeData.bollinger.upper_band 
+                    bbUpperSeriesRef.current.update({
+                        time: toVietnamTime(candleStartTime),
+                        value: realtimeData.bollinger.upper_band
                     });
                 }
                 if (bbLowerSeriesRef.current && realtimeData.bollinger) {
-                    bbLowerSeriesRef.current.update({ 
-                        time: toVietnamTime(candleStartTime), 
-                        value: realtimeData.bollinger.lower_band 
+                    bbLowerSeriesRef.current.update({
+                        time: toVietnamTime(candleStartTime),
+                        value: realtimeData.bollinger.lower_band
                     });
                 }
             }
+
+            // Track last rendered time for chronological order validation (per-timeframe)
+            lastRenderedTimeRef.current['1m'] = chartTime;
         } catch (err) {
             console.error('Error updating candle:', err);
         }
     }, [realtimeData, timeframe, isLoading]);
+
+    // Handle 15m realtime updates from backend WebSocket (SOTA multi-stream)
+    useEffect(() => {
+        if (!realtimeData15m || isLoading || isDisposedRef.current || timeframe !== '15m') return;
+
+        try {
+            // Use time field directly (Unix timestamp from backend)
+            const rawTime = realtimeData15m.time || safeParseTimestamp(realtimeData15m.timestamp);
+            if (!rawTime || rawTime <= 0) return;
+
+            // CRITICAL: Ensure time is a primitive number, not a Time type object
+            const time = Number(rawTime);
+            const chartTime = Number(toVietnamTime(time));
+
+            // Validate time is actually a number
+            if (isNaN(chartTime) || typeof chartTime !== 'number') {
+                console.error('Invalid chartTime (not a number):', chartTime, typeof chartTime);
+                return;
+            }
+
+            // Skip if older than last rendered (for 15m timeframe)
+            if (chartTime < lastRenderedTimeRef.current['15m']) return;
+
+            console.log('📊 Updating 15m chart with:', { time: chartTime, close: realtimeData15m.close });
+
+            if (candleSeriesRef.current) {
+                candleSeriesRef.current.update({
+                    time: chartTime as Time,
+                    open: realtimeData15m.open,
+                    high: realtimeData15m.high,
+                    low: realtimeData15m.low,
+                    close: realtimeData15m.close,
+                });
+            }
+
+            setCurrentPrice(realtimeData15m.close);
+            lastRenderedTimeRef.current['15m'] = chartTime;
+        } catch (err) {
+            console.error('Error updating 15m candle:', err);
+        }
+    }, [realtimeData15m, timeframe, isLoading]);
+
+    // Handle 1h realtime updates from backend WebSocket (SOTA multi-stream)
+    useEffect(() => {
+        if (!realtimeData1h || isLoading || isDisposedRef.current || timeframe !== '1h') return;
+
+        try {
+            // Use time field directly (Unix timestamp from backend)
+            const rawTime = realtimeData1h.time || safeParseTimestamp(realtimeData1h.timestamp);
+            if (!rawTime || rawTime <= 0) return;
+
+            // CRITICAL: Ensure time is a primitive number, not a Time type object
+            const time = Number(rawTime);
+            const chartTime = Number(toVietnamTime(time));
+
+            // Validate time is actually a number
+            if (isNaN(chartTime) || typeof chartTime !== 'number') {
+                console.error('Invalid chartTime (not a number):', chartTime, typeof chartTime);
+                return;
+            }
+
+            // Skip if older than last rendered (for 1h timeframe)
+            if (chartTime < lastRenderedTimeRef.current['1h']) return;
+
+            console.log('📊 Updating 1h chart with:', { time: chartTime, close: realtimeData1h.close });
+
+            if (candleSeriesRef.current) {
+                candleSeriesRef.current.update({
+                    time: chartTime as Time,
+                    open: realtimeData1h.open,
+                    high: realtimeData1h.high,
+                    low: realtimeData1h.low,
+                    close: realtimeData1h.close,
+                });
+            }
+
+            setCurrentPrice(realtimeData1h.close);
+            lastRenderedTimeRef.current['1h'] = chartTime;
+        } catch (err) {
+            console.error('Error updating 1h candle:', err);
+        }
+    }, [realtimeData1h, timeframe, isLoading]);
 
     // Get current Vietnam time
     const getCurrentVietnamTime = () => {
@@ -715,30 +911,30 @@ const CandleChart: React.FC = () => {
                     <span style={{ fontSize: '18px', fontWeight: 700, color: BINANCE_COLORS.textPrimary }}>
                         BTC/USDT
                     </span>
-                    <span style={{ 
+                    <span style={{
                         fontSize: '12px',
                         padding: '2px 8px',
                         borderRadius: '4px',
-                        backgroundColor: BINANCE_COLORS.buyBg, 
-                        color: BINANCE_COLORS.buy 
+                        backgroundColor: BINANCE_COLORS.buyBg,
+                        color: BINANCE_COLORS.buy
                     }}>
                         Perpetual
                     </span>
-                    <span style={{ 
-                        fontSize: '20px', 
-                        fontFamily: "'JetBrains Mono', monospace", 
-                        fontWeight: 700, 
-                        color: BINANCE_COLORS.textPrimary 
+                    <span style={{
+                        fontSize: '20px',
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontWeight: 700,
+                        color: BINANCE_COLORS.textPrimary
                     }}>
                         {currentPrice > 0 ? `$${formatPrice(currentPrice)}` : '---'}
                     </span>
-                    <span style={{ 
-                        fontSize: '14px', 
+                    <span style={{
+                        fontSize: '14px',
                         fontFamily: "'JetBrains Mono', monospace",
                         fontWeight: 500,
-                        color: priceChange >= 0 ? BINANCE_COLORS.buy : BINANCE_COLORS.sell 
+                        color: priceChange >= 0 ? BINANCE_COLORS.buy : BINANCE_COLORS.sell
                     }}>
-                        {currentPrice > 0 
+                        {currentPrice > 0
                             ? `${priceChange >= 0 ? '+' : ''}${formatPrice(priceChange)} (${((priceChange / currentPrice) * 100).toFixed(2)}%)`
                             : '---'
                         }
@@ -751,7 +947,7 @@ const CandleChart: React.FC = () => {
                         {(['1m', '15m', '1h'] as Timeframe[]).map((tf) => (
                             <button
                                 key={tf}
-                                onClick={() => setTimeframe(tf)}
+                                onClick={() => handleTimeframeChange(tf)}
                                 style={{
                                     padding: '4px 12px',
                                     borderRadius: '4px',
@@ -769,10 +965,10 @@ const CandleChart: React.FC = () => {
                         ))}
                     </div>
                     {/* Vietnam Time */}
-                    <span style={{ 
-                        fontSize: '12px', 
-                        fontFamily: "'JetBrains Mono', monospace", 
-                        color: BINANCE_COLORS.textTertiary 
+                    <span style={{
+                        fontSize: '12px',
+                        fontFamily: "'JetBrains Mono', monospace",
+                        color: BINANCE_COLORS.textTertiary
                     }}>
                         🇻🇳 {currentTime}
                     </span>
@@ -807,7 +1003,7 @@ const CandleChart: React.FC = () => {
                 </div>
                 {openPositions.length > 0 && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
-                        <span style={{ 
+                        <span style={{
                             color: openPositions[0].side === 'LONG' ? BINANCE_COLORS.buy : BINANCE_COLORS.sell,
                             fontWeight: 600
                         }}>
@@ -887,8 +1083,8 @@ const CandleChart: React.FC = () => {
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '6px',
-                                    backgroundColor: s.signal.type === 'BUY' 
-                                        ? 'rgba(46, 189, 133, 0.2)' 
+                                    backgroundColor: s.signal.type === 'BUY'
+                                        ? 'rgba(46, 189, 133, 0.2)'
                                         : 'rgba(246, 70, 93, 0.2)',
                                     border: `1px solid ${s.color}`,
                                     color: s.color,
@@ -897,7 +1093,7 @@ const CandleChart: React.FC = () => {
                                 <span>{s.signal.type === 'BUY' ? '▲' : '▼'}</span>
                                 <span>{s.signal.type}</span>
                                 <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                                    ${s.signal.entry_price.toFixed(0)}
+                                    ${(s.signal.entry_price ?? 0).toFixed(0)}
                                 </span>
                             </div>
                         ))}
@@ -918,20 +1114,20 @@ const CandleChart: React.FC = () => {
                         left: Math.min(tooltipData.x + 10, (chartContainerRef.current?.clientWidth || 400) - 200),
                         top: Math.max(tooltipData.y - 100, 10)
                     }}>
-                        <div style={{ 
-                            fontSize: '14px', 
-                            fontWeight: 700, 
+                        <div style={{
+                            fontSize: '14px',
+                            fontWeight: 700,
                             marginBottom: '8px',
-                            color: tooltipData.signal.type === 'BUY' ? BINANCE_COLORS.buy : BINANCE_COLORS.sell 
+                            color: tooltipData.signal.type === 'BUY' ? BINANCE_COLORS.buy : BINANCE_COLORS.sell
                         }}>
                             {tooltipData.signal.type === 'BUY' ? '▲' : '▼'} {tooltipData.signal.type} SIGNAL
                         </div>
                         <div style={{ fontSize: '12px', color: BINANCE_COLORS.textSecondary }}>
-                            <div style={{ marginBottom: '4px' }}>Entry: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.textPrimary }}>${tooltipData.signal.entry_price.toFixed(2)}</span></div>
-                            <div style={{ marginBottom: '4px' }}>Stop Loss: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.sell }}>${tooltipData.signal.stop_loss.toFixed(2)}</span></div>
-                            <div style={{ marginBottom: '4px' }}>Take Profit: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.buy }}>${tooltipData.signal.take_profit.toFixed(2)}</span></div>
-                            <div style={{ marginBottom: '4px' }}>Confidence: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.vwap }}>{(tooltipData.signal.confidence * 100).toFixed(0)}%</span></div>
-                            <div>R:R Ratio: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.bollinger }}>{tooltipData.signal.risk_reward_ratio.toFixed(2)}</span></div>
+                            <div style={{ marginBottom: '4px' }}>Entry: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.textPrimary }}>${(tooltipData.signal.entry_price ?? 0).toFixed(2)}</span></div>
+                            <div style={{ marginBottom: '4px' }}>Stop Loss: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.sell }}>${(tooltipData.signal.stop_loss ?? 0).toFixed(2)}</span></div>
+                            <div style={{ marginBottom: '4px' }}>Take Profit: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.buy }}>${(tooltipData.signal.take_profit ?? 0).toFixed(2)}</span></div>
+                            <div style={{ marginBottom: '4px' }}>Confidence: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.vwap }}>{((tooltipData.signal.confidence ?? 0) * 100).toFixed(0)}%</span></div>
+                            <div>R:R Ratio: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.bollinger }}>{(tooltipData.signal.risk_reward_ratio ?? 0).toFixed(2)}</span></div>
                         </div>
                     </div>
                 )}
@@ -939,32 +1135,32 @@ const CandleChart: React.FC = () => {
 
             {/* Active Signal Info Bar */}
             {activeSignal && (
-                <div style={{ 
+                <div style={{
                     padding: '12px',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     fontSize: '12px',
-                    backgroundColor: BINANCE_COLORS.cardBg, 
-                    borderTop: `1px solid ${BINANCE_COLORS.line}` 
+                    backgroundColor: BINANCE_COLORS.cardBg,
+                    borderTop: `1px solid ${BINANCE_COLORS.line}`
                 }}>
                     <div style={{ display: 'flex', gap: '24px' }}>
                         <span style={{ color: BINANCE_COLORS.textTertiary }}>
-                            Entry: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.textPrimary }}>${activeSignal.entry_price.toFixed(2)}</span>
+                            Entry: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.textPrimary }}>${(activeSignal.entry_price ?? 0).toFixed(2)}</span>
                         </span>
                         <span style={{ color: BINANCE_COLORS.textTertiary }}>
-                            SL: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.sell }}>${activeSignal.stop_loss.toFixed(2)}</span>
+                            SL: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.sell }}>${(activeSignal.stop_loss ?? 0).toFixed(2)}</span>
                         </span>
                         <span style={{ color: BINANCE_COLORS.textTertiary }}>
-                            TP: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.buy }}>${activeSignal.take_profit.toFixed(2)}</span>
+                            TP: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.buy }}>${(activeSignal.take_profit ?? 0).toFixed(2)}</span>
                         </span>
                     </div>
                     <div style={{ display: 'flex', gap: '24px' }}>
                         <span style={{ color: BINANCE_COLORS.textTertiary }}>
-                            Confidence: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.vwap }}>{(activeSignal.confidence * 100).toFixed(0)}%</span>
+                            Confidence: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.vwap }}>{((activeSignal.confidence ?? 0) * 100).toFixed(0)}%</span>
                         </span>
                         <span style={{ color: BINANCE_COLORS.textTertiary }}>
-                            R:R: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.bollinger }}>{activeSignal.risk_reward_ratio.toFixed(2)}</span>
+                            R:R: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: BINANCE_COLORS.bollinger }}>{(activeSignal.risk_reward_ratio ?? 0).toFixed(2)}</span>
                         </span>
                     </div>
                 </div>

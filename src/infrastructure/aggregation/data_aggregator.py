@@ -36,6 +36,9 @@ class DataAggregator:
         # Buffers for 1-minute candles
         self._candles_1m: deque[Candle] = deque(maxlen=buffer_size)
         
+        # SOTA FIX: Track current FORMING 1m candle for realtime aggregation
+        self._current_forming_1m: Optional[Candle] = None
+        
         # Current aggregating candles
         self._current_15m: Optional[Candle] = None
         self._current_1h: Optional[Candle] = None
@@ -62,9 +65,12 @@ class DataAggregator:
         # Add to 1m buffer
         self._candles_1m.append(candle)
         
-        # Only aggregate closed candles
+        # SOTA FIX: Always track current forming candle for realtime 15m/1h
+        self._current_forming_1m = candle
+        
+        # Only aggregate closed candles for permanent buffer
         if not is_closed:
-            self.logger.debug(f"Candle not closed yet: {candle.timestamp}")
+            self.logger.debug(f"Candle forming (tracked for realtime): {candle.timestamp}")
             return
         
         self.logger.debug(f"Processing closed 1m candle: {candle.timestamp}")
@@ -229,6 +235,50 @@ class DataAggregator:
             Current 1h Candle or None if not available
         """
         return self._current_1h
+    
+    def get_forming_15m(self) -> Optional[Candle]:
+        """
+        SOTA: Get the FORMING 15-minute candle (aggregated from current buffer + forming 1m).
+        
+        This enables realtime updates for 15m chart before candle completes.
+        Includes the current forming 1m candle for true tick-by-tick updates.
+        
+        Returns:
+            Forming 15m Candle aggregated from buffer + current tick, or None if no data
+        """
+        # Build list: closed candles + current forming candle
+        candles_to_aggregate = self._buffer_15m.copy()
+        
+        # SOTA FIX: Include current forming 1m candle for realtime updates
+        if self._current_forming_1m:
+            candles_to_aggregate.append(self._current_forming_1m)
+        
+        if not candles_to_aggregate:
+            return None
+        
+        return self._aggregate_candles(candles_to_aggregate, '15m_forming')
+    
+    def get_forming_1h(self) -> Optional[Candle]:
+        """
+        SOTA: Get the FORMING 1-hour candle (aggregated from current buffer + forming 1m).
+        
+        This enables realtime updates for 1h chart before candle completes.
+        Includes the current forming 1m candle for true tick-by-tick updates.
+        
+        Returns:
+            Forming 1h Candle aggregated from buffer + current tick, or None if no data
+        """
+        # Build list: closed candles + current forming candle
+        candles_to_aggregate = self._buffer_1h.copy()
+        
+        # SOTA FIX: Include current forming 1m candle for realtime updates
+        if self._current_forming_1m:
+            candles_to_aggregate.append(self._current_forming_1m)
+        
+        if not candles_to_aggregate:
+            return None
+        
+        return self._aggregate_candles(candles_to_aggregate, '1h_forming')
     
     def get_latest_1m_candles(self, count: int = 10) -> List[Candle]:
         """
