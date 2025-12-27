@@ -1,6 +1,6 @@
 # SHARED BOARD - Inter-Agent Collaboration Space
 
-Version: 1.1 | Updated: 2025-12-22
+Version: 1.2 | Updated: 2025-12-27
 
 This is the central shared memory for all AI agents. Update this file when:
 - Making decisions that affect other agents
@@ -12,9 +12,9 @@ This is the central shared memory for all AI agents. Update this file when:
 
 ## CURRENT SPRINT STATUS
 
-Phase: Layer 1 Fully Operational ✅
+Phase: SOTA Strategy Config ✅
 Sprint: 2025-W52
-Focus: Signal Generator + Paper Trading - COMPLETE
+Focus: Signal Generation + Trade Execution Flow - COMPLETE
 
 ### Active Work
 
@@ -22,10 +22,11 @@ Focus: Signal Generator + Paper Trading - COMPLETE
 |-------|--------------|--------|----------|--------------|
 | PM | System setup | Complete | None | 2025-12-22 |
 | FE | Execute button fix | ✅ Complete | None | 2025-12-22 |
-| BE | Paper trading logic fix | ✅ Complete | None | 2025-12-22 |
+| BE | **SOTA Strategy Config** | **✅ Complete** | None | **2025-12-27** |
+| BE | **Signal Flow Fix** | **✅ Complete** | None | **2025-12-27** |
 | DB | Codebase audit | Complete | None | 2025-12-22 |
 | QA | Codebase audit | Complete | None | 2025-12-22 |
-| **QS** | **Initial setup** | **✅ Ready** | **None** | **2025-12-23** |
+| QS | Initial setup | ✅ Ready | None | 2025-12-23 |
 
 
 ---
@@ -75,6 +76,17 @@ Made By: BE (historical)
 Affects: BE, DB
 Decision: 4-layer Clean Architecture (API/App/Domain/Infra)
 Status: Already Implemented
+
+### [DECISION-003] SOTA Strategy Configuration Architecture
+Date: 2025-12-27
+Made By: BE + Human Owner
+Affects: BE, Signal Generation, Trade Execution
+Decision: 
+- Centralized StrategyConfig dataclass with environment-based tuning
+- Regime penalty mode (replace hard block)
+- ConfluenceScorer for weighted signal scoring (60% threshold)
+- PaperTradingService injection into RealtimeService for signal→trade flow
+Status: Implemented
 
 ---
 

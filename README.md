@@ -168,6 +168,32 @@ Binance WebSocket (Combined Streams)
 | Restart with data | Binance only | SQLite first (fast) |
 | Binance API down | No data | Use SQLite cache |
 
+### 🧠 SOTA Strategy Configuration (Dec 2025)
+
+**Problem:** Hardcoded strategy parameters caused near-zero signal generation.
+
+**Solution:** Centralized `StrategyConfig` dataclass with environment-based tuning:
+
+| Parameter | Before | After (SOTA) |
+|-----------|--------|--------------|
+| `strict_mode` | True (4/5) | **False** (3/5) |
+| `regime_filter` | Hard block | **Penalty mode** (-30%) |
+| `bb_threshold` | 1.5% | **2.5%** |
+| `vwap_threshold` | 1.0% | **2.0%** |
+| `stoch_oversold` | 20 | **30** |
+
+**Key Components:**
+- `StrategyConfig` - Centralized in `config.py`
+- `ConfluenceScorer` - Weighted signal scoring (60% threshold)
+- `RegimeDetector` - ADX-based with configurable threshold
+
+**Environment Variables:**
+```env
+STRATEGY_STRICT_MODE=false
+STRATEGY_REGIME_FILTER_MODE=penalty
+STRATEGY_BB_THRESHOLD_PCT=0.025
+```
+
 ---
 
 ## 🛠️ Project Structure

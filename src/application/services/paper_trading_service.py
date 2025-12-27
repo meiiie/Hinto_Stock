@@ -60,6 +60,13 @@ class PaperTradingService:
         self.RISK_PER_TRADE = 0.015  # 1.5% risk per trade (Tuned)
         self.LEVERAGE = 1
         
+        # SOTA FIX: Signal cooldown after closing a position
+        self.COOLDOWN_SECONDS = 300  # 5 minutes
+        self._last_trade_close_time: Optional[datetime] = None
+        
+        # SOTA FIX: Allow position flip (close + open opposite)
+        self.ALLOW_FLIP = True
+        
         # State Machine Callbacks (ISSUE-001 Fix)
         # Called when a PENDING order is filled and becomes OPEN
         self.on_order_filled: Optional[Callable[[str], None]] = None
@@ -106,8 +113,20 @@ class PaperTradingService:
 
     def on_signal_received(self, signal: TradingSignal, symbol: str = "BTCUSDT") -> None:
         """
-        Handle new trading signal (Limit Order Execution).
+        Handle new trading signal.
+        
+        SOTA FIX:
+        - Added cooldown check after closing position
+        - Allow position flip (close + open opposite direction)
         """
+        # SOTA FIX: Check cooldown after last trade close
+        if self._last_trade_close_time:
+            time_since_close = (datetime.now() - self._last_trade_close_time).total_seconds()
+            if time_since_close < self.COOLDOWN_SECONDS:
+                remaining = int(self.COOLDOWN_SECONDS - time_since_close)
+                logger.info(f"⏸️ COOLDOWN: {remaining}s remaining. Signal ignored.")
+                return
+        
         # 0. Zombie Killer: Cancel existing PENDING orders for this symbol
         pending_orders = self.repo.get_pending_orders()
         for order in pending_orders:
@@ -122,12 +141,21 @@ class PaperTradingService:
         active_positions = self.get_positions()
         for pos in active_positions:
             if pos.symbol == symbol:
-                # If signal is opposite to current position, Close it (Flip)
+                # If signal is opposite to current position
                 if (pos.side == 'LONG' and signal.signal_type == SignalType.SELL) or \
                    (pos.side == 'SHORT' and signal.signal_type == SignalType.BUY):
-                    logger.info(f"🔄 REVERSAL SIGNAL: Closing {pos.side} position. NO FLIP.")
+                    logger.info(f"🔄 REVERSAL SIGNAL: Closing {pos.side} position.")
                     self.close_position(pos, signal.price, "SIGNAL_REVERSAL")
-                    return # STOP HERE. Do not open new position.
+                    self._last_trade_close_time = datetime.now()
+                    
+                    # SOTA FIX: If ALLOW_FLIP, continue to open new position
+                    if not self.ALLOW_FLIP:
+                        logger.info("⏹️ FLIP disabled. Not opening opposite position.")
+                        return
+                    else:
+                        logger.info(f"↪️ FLIP enabled. Opening new {signal.signal_type.value.upper()} position.")
+                        # Continue to create new position (don't return)
+                        break
                 else:
                     # Same side -> Allow adding to position (Merging)
                     pass

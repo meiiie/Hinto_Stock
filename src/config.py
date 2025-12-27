@@ -94,6 +94,112 @@ class ExchangeConfig:
         return self.trading_mode == "REAL"
 
 
+@dataclass
+class StrategyConfig:
+    """
+    SOTA: Centralized strategy configuration for signal generation.
+    
+    Based on: Two Sigma's parameter management, Binance's configurable trading bots.
+    
+    This allows tuning entry conditions without code changes, following
+    institutional best practices for algorithm parameter management.
+    
+    Attributes:
+        # Mode settings
+        strict_mode: If True, requires 4/5 conditions. If False, 3/5.
+        use_regime_filter: Enable/disable regime-based filtering.
+        
+        # Entry zone thresholds
+        bb_near_threshold_pct: % distance to consider "near" Bollinger Band
+        vwap_near_threshold_pct: % distance to consider "near" VWAP
+        
+        # Regime filter settings
+        adx_trending_threshold: ADX value above which market is "trending"
+        regime_filter_mode: "block" (hard reject) or "penalty" (reduce confidence)
+        regime_penalty_pct: Confidence reduction when in ranging market
+        
+        # Confluence scoring
+        min_confluence_score: Minimum weighted score to generate signal (0-1)
+        use_weighted_confluence: Use weighted scoring instead of condition count
+        
+        # StochRSI thresholds
+        stoch_oversold_threshold: K value below which is "oversold"
+        stoch_overbought_threshold: K value above which is "overbought"
+    """
+    # Mode settings
+    strict_mode: bool = False  # SOTA: Default to flexible for more signals
+    use_regime_filter: bool = True
+    
+    # Entry zone thresholds (percentage) - WIDENED from original
+    bb_near_threshold_pct: float = 0.025  # 2.5% (was 1.5%)
+    vwap_near_threshold_pct: float = 0.020  # 2.0% (was 1.0%)
+    
+    # Regime filter settings - SOFTENED
+    adx_trending_threshold: float = 20.0  # Lowered from 25 for more opportunities
+    regime_filter_mode: str = "penalty"  # "block" | "penalty" - SOTA: penalty mode
+    regime_penalty_pct: float = 0.30  # 30% confidence reduction in ranging
+    
+    # Confluence scoring - NEW FEATURE
+    min_confluence_score: float = 0.60  # 60% weighted score (vs 80% condition count)
+    use_weighted_confluence: bool = True
+    
+    # Confluence condition weights (must sum to 1.0)
+    weight_trend_alignment: float = 0.25  # Price vs VWAP
+    weight_pullback_zone: float = 0.30    # Near BB/VWAP (most important)
+    weight_momentum_trigger: float = 0.25  # StochRSI cross
+    weight_candle_confirmation: float = 0.10  # Green/Red candle
+    weight_volume_confirmation: float = 0.10  # Volume spike
+    
+    # StochRSI thresholds - EXPANDED zones
+    stoch_oversold_threshold: float = 30.0  # Expanded from 20
+    stoch_overbought_threshold: float = 70.0  # Expanded from 80
+    
+    # Risk management
+    min_risk_reward_ratio: float = 0.8  # Minimum R:R to accept signal
+    max_volume_ratio: float = 4.0  # Maximum volume ratio (climax filter)
+    
+    # SOTA: Trade execution settings
+    cooldown_seconds: int = 300  # 5 minutes cooldown after closing a position
+    allow_flip: bool = True  # Allow position flip (close + open opposite direction)
+    
+    def __post_init__(self):
+        """Validate configuration values."""
+        # Validate regime filter mode
+        valid_modes = ('block', 'penalty')
+        if self.regime_filter_mode.lower() not in valid_modes:
+            logging.warning(
+                f"Invalid regime_filter_mode: {self.regime_filter_mode}. "
+                f"Using default: penalty"
+            )
+            self.regime_filter_mode = "penalty"
+        else:
+            self.regime_filter_mode = self.regime_filter_mode.lower()
+        
+        # Validate weights sum to 1.0
+        total_weight = (
+            self.weight_trend_alignment +
+            self.weight_pullback_zone +
+            self.weight_momentum_trigger +
+            self.weight_candle_confirmation +
+            self.weight_volume_confirmation
+        )
+        if abs(total_weight - 1.0) > 0.01:
+            logging.warning(
+                f"Confluence weights sum to {total_weight:.2f}, not 1.0. "
+                f"Results may be unexpected."
+            )
+    
+    def get_confluence_weights(self) -> dict:
+        """Get condition weights as dictionary."""
+        return {
+            'trend_alignment': self.weight_trend_alignment,
+            'pullback_zone': self.weight_pullback_zone,
+            'momentum_trigger': self.weight_momentum_trigger,
+            'candle_confirmation': self.weight_candle_confirmation,
+            'volume_confirmation': self.weight_volume_confirmation,
+        }
+
+
 class Config:
     """
     Configuration manager for the Binance Data Pipeline.
@@ -133,6 +239,42 @@ class Config:
         self._load_book_ticker_config()
         self._load_safety_config()
         self._load_exchange_config()
+        self._load_strategy_config()  # SOTA: Strategy parameters
+    
+    def _load_strategy_config(self) -> None:
+        """
+        Load Strategy configuration from environment.
+        
+        SOTA: Allows runtime tuning of signal generation parameters
+        without code changes. Follows Two Sigma/Binance patterns.
+        """
+        # Load optional overrides from environment
+        strict_mode = os.getenv("STRATEGY_STRICT_MODE", "false").lower() in ("true", "1", "yes")
+        use_regime_filter = os.getenv("STRATEGY_USE_REGIME_FILTER", "true").lower() in ("true", "1", "yes")
+        regime_filter_mode = os.getenv("STRATEGY_REGIME_FILTER_MODE", "penalty")
+        
+        # Parse numeric values with defaults
+        def parse_float(key: str, default: float) -> float:
+            try:
+                return float(os.getenv(key, str(default)))
+            except ValueError:
+                logging.warning(f"Invalid {key}, using default: {default}")
+                return default
+        
+        bb_threshold = parse_float("STRATEGY_BB_THRESHOLD_PCT", 0.025)
+        vwap_threshold = parse_float("STRATEGY_VWAP_THRESHOLD_PCT", 0.020)
+        adx_threshold = parse_float("STRATEGY_ADX_THRESHOLD", 20.0)
+        min_confluence = parse_float("STRATEGY_MIN_CONFLUENCE_SCORE", 0.60)
+        
+        self.strategy = StrategyConfig(
+            strict_mode=strict_mode,
+            use_regime_filter=use_regime_filter,
+            regime_filter_mode=regime_filter_mode,
+            bb_near_threshold_pct=bb_threshold,
+            vwap_near_threshold_pct=vwap_threshold,
+            adx_trending_threshold=adx_threshold,
+            min_confluence_score=min_confluence,
+        )
     
     def _load_book_ticker_config(self) -> None:
         """Load BookTicker configuration from environment."""

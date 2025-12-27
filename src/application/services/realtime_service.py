@@ -78,6 +78,8 @@ class RealtimeService:
         signal_generator: Optional[SignalGenerator] = None,
         # SOTA FIX: Market data repository for candle persistence (Phase 2)
         market_data_repository: Optional[MarketDataRepository] = None,
+        # SOTA FIX: Signal lifecycle service for persistence
+        lifecycle_service = None,  # SignalLifecycleService (avoid circular import)
     ):
         """
         Initialize real-time service with dependency injection.
@@ -135,6 +137,9 @@ class RealtimeService:
         
         # SOTA FIX: Market data repository for candle persistence (Phase 2)
         self._market_data_repository = market_data_repository
+        
+        # SOTA FIX: Signal lifecycle service for persistence
+        self._lifecycle_service = lifecycle_service
         
         # Data storage (in-memory cache)
         self._latest_1m: Optional[Candle] = None
@@ -307,59 +312,142 @@ class RealtimeService:
 
     async def _load_historical_data(self) -> None:
         """
-        SOTA Hybrid Load: SQLite first, Binance fallback.
+        SOTA Fresh Load: Always fetch 500 latest candles from Binance on startup.
         
-        This populates the buffer with recent candles so the dashboard
-        shows data immediately instead of waiting for the first candle to close.
+        FIX: Previous logic merged SQLite (old) + Binance (new), causing stale data.
+        Now: ALWAYS fetch fresh candles from Binance, then persist for future sessions.
         
         Architecture:
-        - L1: In-memory deques (fastest, volatile)
-        - L2: SQLite (fast, persistent)
-        - L3: Binance REST API (slow, source of truth)
+        1. Fetch 500 latest from Binance REST API (source of truth)
+        2. Populate in-memory buffers (L1 cache)
+        3. Persist to SQLite for future fast-startup (L2 cache)
         
-        Note: Load 500 candles to satisfy frontend requirement (400 + 50 warm-up + buffer)
+        This ensures charts always show the most current 400 candles.
         """
         try:
-            self.logger.info("🚀 Loading historical candles (SOTA Hybrid)...")
+            self.logger.info("🚀 Loading historical candles (SOTA Fresh Mode)...")
             
             # SOTA: Load 500 candles for professional chart display
             # Frontend requests 400, plus 50 warm-up trim = 450 minimum
             CANDLE_LOAD_LIMIT = 500
             
-            # 1. Load 1m candles
-            candles_1m = self._load_candles_hybrid('1m', CANDLE_LOAD_LIMIT)
+            # 1. Load 1m candles - ALWAYS from Binance
+            self.logger.info(f"📡 Fetching {CANDLE_LOAD_LIMIT} fresh 1m candles from Binance...")
+            candles_1m = self.rest_client.get_klines(
+                symbol=self.symbol,
+                interval='1m',
+                limit=CANDLE_LOAD_LIMIT
+            )
             if candles_1m:
+                # Clear buffer and populate with fresh data
+                self._candles_1m.clear()
                 for candle in candles_1m:
                     self._candles_1m.append(candle)
                     self.aggregator.add_candle_1m(candle, is_closed=True)
                 self._latest_1m = candles_1m[-1]
-                self.logger.info(f"✅ Loaded {len(candles_1m)} 1m candles")
+                self.logger.info(f"✅ Loaded {len(candles_1m)} fresh 1m candles")
+                
+                # Persist to SQLite for future quick restarts
+                if self._market_data_repository:
+                    self._persist_candles_batch(candles_1m, '1m')
             else:
-                self.logger.warning("No 1m data available")
+                self.logger.warning("⚠️ No 1m data from Binance, trying SQLite fallback...")
+                candles_1m = self._load_candles_hybrid('1m', CANDLE_LOAD_LIMIT)
+                for candle in candles_1m:
+                    self._candles_1m.append(candle)
             
-            # 2. Load 15m candles (exclude last = incomplete)
-            candles_15m = self._load_candles_hybrid('15m', CANDLE_LOAD_LIMIT)
+            # 2. Load 15m candles - ALWAYS from Binance
+            self.logger.info(f"📡 Fetching {CANDLE_LOAD_LIMIT} fresh 15m candles from Binance...")
+            candles_15m = self.rest_client.get_klines(
+                symbol=self.symbol,
+                interval='15m',
+                limit=CANDLE_LOAD_LIMIT
+            )
             if candles_15m and len(candles_15m) > 1:
+                self._candles_15m.clear()
                 completed_15m = candles_15m[:-1]  # Exclude incomplete
                 for candle in completed_15m:
                     self._candles_15m.append(candle)
                 self._latest_15m = completed_15m[-1]
-                self.logger.info(f"✅ Loaded {len(completed_15m)} 15m candles")
+                self.logger.info(f"✅ Loaded {len(completed_15m)} fresh 15m candles")
+                
+                # Persist to SQLite
+                if self._market_data_repository:
+                    self._persist_candles_batch(completed_15m, '15m')
+            else:
+                self.logger.warning("⚠️ No 15m data from Binance")
             
-            # 3. Load 1h candles (exclude last = incomplete)
-            candles_1h = self._load_candles_hybrid('1h', CANDLE_LOAD_LIMIT)
+            # 3. Load 1h candles - ALWAYS from Binance
+            self.logger.info(f"📡 Fetching {CANDLE_LOAD_LIMIT} fresh 1h candles from Binance...")
+            candles_1h = self.rest_client.get_klines(
+                symbol=self.symbol,
+                interval='1h',
+                limit=CANDLE_LOAD_LIMIT
+            )
             if candles_1h and len(candles_1h) > 1:
+                self._candles_1h.clear()
                 completed_1h = candles_1h[:-1]
                 for candle in completed_1h:
                     self._candles_1h.append(candle)
                 self._latest_1h = completed_1h[-1]
-                self.logger.info(f"✅ Loaded {len(completed_1h)} 1h candles")
+                self.logger.info(f"✅ Loaded {len(completed_1h)} fresh 1h candles")
+                
+                # Persist to SQLite
+                if self._market_data_repository:
+                    self._persist_candles_batch(completed_1h, '1h')
+            else:
+                self.logger.warning("⚠️ No 1h data from Binance")
             
-            self.logger.info("✅ Historical data loaded successfully (SOTA Hybrid)")
+            self.logger.info("✅ Historical data loaded successfully (SOTA Fresh Mode)")
             
         except Exception as e:
-            self.logger.error(f"Error loading historical data: {e}")
-            # Don't fail - continue with WebSocket streaming
+            self.logger.error(f"❌ Error loading historical data: {e}")
+            # Fallback to hybrid (SQLite + Binance) if fresh load fails
+            self.logger.info("🔄 Falling back to hybrid load...")
+            await self._load_historical_data_hybrid_fallback()
+    
+    async def _load_historical_data_hybrid_fallback(self) -> None:
+        """Fallback hybrid load if fresh Binance load fails."""
+        try:
+            CANDLE_LOAD_LIMIT = 500
+            
+            candles_1m = self._load_candles_hybrid('1m', CANDLE_LOAD_LIMIT)
+            for candle in candles_1m:
+                self._candles_1m.append(candle)
+            if candles_1m:
+                self._latest_1m = candles_1m[-1]
+                
+            candles_15m = self._load_candles_hybrid('15m', CANDLE_LOAD_LIMIT)
+            if candles_15m:
+                for candle in candles_15m[:-1]:
+                    self._candles_15m.append(candle)
+                self._latest_15m = candles_15m[-2] if len(candles_15m) > 1 else None
+                
+            candles_1h = self._load_candles_hybrid('1h', CANDLE_LOAD_LIMIT)
+            if candles_1h:
+                for candle in candles_1h[:-1]:
+                    self._candles_1h.append(candle)
+                self._latest_1h = candles_1h[-2] if len(candles_1h) > 1 else None
+                
+            self.logger.info("✅ Hybrid fallback load complete")
+        except Exception as e:
+            self.logger.error(f"Hybrid fallback also failed: {e}")
+    
+    def _persist_candles_batch(self, candles: List[Candle], timeframe: str) -> None:
+        """Persist a batch of candles to SQLite asynchronously."""
+        if not self._market_data_repository or not candles:
+            return
+            
+        saved_count = 0
+        for candle in candles:
+            try:
+                self._market_data_repository.save_candle_simple(candle, timeframe)
+                saved_count += 1
+            except Exception:
+                pass  # Ignore duplicates
+        
+        if saved_count > 0:
+            self.logger.debug(f"💾 Persisted {saved_count} {timeframe} candles to SQLite")
     
     async def stop(self) -> None:
         """
@@ -680,7 +768,40 @@ class RealtimeService:
 
     
     def _notify_signal_callbacks(self, signal: TradingSignal) -> None:
-        """Notify all signal callbacks."""
+        """
+        Notify all signal callbacks, persist to DB, and broadcast via EventBus.
+        
+        SOTA FIX: This was missing signal persistence and WebSocket broadcast.
+        """
+        # 1. SOTA FIX: Save signal to database via lifecycle service
+        if self._lifecycle_service:
+            try:
+                saved_signal = self._lifecycle_service.register_signal(signal)
+                self.logger.info(f"💾 Signal persisted: {saved_signal.id if saved_signal else 'none'}")
+            except Exception as e:
+                self.logger.error(f"Error persisting signal: {e}")
+        
+        # 2. SOTA FIX: Broadcast signal via EventBus to frontend
+        if self._event_bus:
+            try:
+                signal_data = {
+                    'id': getattr(signal, 'id', None),
+                    'signal_type': signal.signal_type.value,
+                    'price': signal.price,
+                    'entry_price': signal.entry_price,
+                    'stop_loss': signal.stop_loss,
+                    'tp_levels': signal.tp_levels,
+                    'confidence': signal.confidence,
+                    'timeframe': signal.timeframe,
+                    'timestamp': signal.timestamp.isoformat() if signal.timestamp else None,
+                    'meta': getattr(signal, 'meta', {}),
+                }
+                self._event_bus.publish_signal(signal_data, symbol=self.symbol)
+                self.logger.info(f"📡 Signal broadcasted: {signal.signal_type.value}")
+            except Exception as e:
+                self.logger.error(f"Error broadcasting signal: {e}")
+        
+        # 3. Legacy: Notify registered callbacks
         for callback in self._signal_callbacks:
             try:
                 callback(signal)

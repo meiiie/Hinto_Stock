@@ -30,6 +30,7 @@ from .indicators.stoch_rsi_calculator import StochRSICalculator
 from .indicators.adx_calculator import ADXCalculator
 from .indicators.atr_calculator import ATRCalculator
 from .indicators.volume_spike_detector import VolumeSpikeDetector
+from .indicators.regime_detector import RegimeDetector  # SOTA: For Layer 0 filtering
 from .websocket.binance_websocket_client import BinanceWebSocketClient
 from .websocket.binance_book_ticker_client import BinanceBookTickerClient
 from .aggregation.data_aggregator import DataAggregator
@@ -485,14 +486,41 @@ class DIContainer:
             self._instances['volume_spike_detector'] = VolumeSpikeDetector()
         return self._instances['volume_spike_detector']
     
+    def get_regime_detector(self) -> RegimeDetector:
+        """
+        Get RegimeDetector instance (singleton).
+        
+        SOTA: Injects ADX threshold from StrategyConfig.
+        
+        Returns:
+            RegimeDetector for Layer 0 market regime classification
+        """
+        if 'regime_detector' not in self._instances:
+            config = self.get_config_instance()
+            strategy_config = config.strategy
+            
+            self._instances['regime_detector'] = RegimeDetector(
+                adx_trending_threshold=strategy_config.adx_trending_threshold
+            )
+            self.logger.debug(
+                f"Created RegimeDetector with ADX threshold: {strategy_config.adx_trending_threshold}"
+            )
+        return self._instances['regime_detector']
+    
     def get_signal_generator(self) -> SignalGenerator:
         """
         Get SignalGenerator instance with all dependencies (singleton).
         
+        SOTA: Now injects StrategyConfig for centralized parameter management.
+        
         Returns:
-            SignalGenerator with injected calculators
+            SignalGenerator with injected calculators and config
         """
         if 'signal_generator' not in self._instances:
+            # SOTA: Get strategy config from centralized Config
+            config = self.get_config_instance()
+            strategy_config = config.strategy
+            
             self._instances['signal_generator'] = SignalGenerator(
                 vwap_calculator=self.get_vwap_calculator(),
                 bollinger_calculator=self.get_bollinger_calculator(),
@@ -501,11 +529,66 @@ class DIContainer:
                 volume_spike_detector=self.get_volume_spike_detector(),
                 adx_calculator=self.get_adx_calculator(),
                 atr_calculator=self.get_atr_calculator(),
-                talib_calculator=self.get_indicator_calculator()
+                talib_calculator=self.get_indicator_calculator(),
+                # SOTA: Inject RegimeDetector for Layer 0 filtering
+                regime_detector=self.get_regime_detector(),
+                # SOTA: Inject config-based parameters instead of hardcoded
+                use_filters=True,
+                strict_mode=strategy_config.strict_mode,
+                use_regime_filter=strategy_config.use_regime_filter,
+                strategy_config=strategy_config,  # Full config object
             )
-            self.logger.debug("Created SignalGenerator with all dependencies")
+            self.logger.info(
+                f"Created SignalGenerator with SOTA config: "
+                f"strict_mode={strategy_config.strict_mode}, "
+                f"regime_mode={strategy_config.regime_filter_mode}"
+            )
         
         return self._instances['signal_generator']
+    
+    def get_paper_trading_service(self):
+        """
+        Get PaperTradingService instance (singleton).
+        
+        SOTA FIX: This was MISSING - signals were generated but never
+        reached trade execution because paper_service was not injected.
+        
+        Returns:
+            PaperTradingService for paper trading execution
+        """
+        if 'paper_trading_service' not in self._instances:
+            # Lazy import to avoid circular dependency
+            from ..application.services.paper_trading_service import PaperTradingService
+            
+            order_repository = self.get_order_repository()
+            self._instances['paper_trading_service'] = PaperTradingService(
+                repository=order_repository  # FIX: correct argument name
+            )
+            self.logger.info("Created PaperTradingService with order repository")
+        
+        return self._instances['paper_trading_service']
+    
+    def get_signal_lifecycle_service(self):
+        """
+        Get SignalLifecycleService instance (singleton).
+        
+        SOTA FIX: This was MISSING - signals were not persisted to DB.
+        
+        Returns:
+            SignalLifecycleService for signal persistence
+        """
+        if 'signal_lifecycle_service' not in self._instances:
+            # Lazy import to avoid circular dependency
+            from ..application.services.signal_lifecycle_service import SignalLifecycleService
+            from ..infrastructure.repositories.sqlite_signal_repository import SQLiteSignalRepository
+            
+            signal_repository = SQLiteSignalRepository()
+            self._instances['signal_lifecycle_service'] = SignalLifecycleService(
+                signal_repository=signal_repository
+            )
+            self.logger.info("Created SignalLifecycleService with signal repository")
+        
+        return self._instances['signal_lifecycle_service']
     
     def get_realtime_service(self, symbol: str = "btcusdt"):
         """
@@ -537,10 +620,14 @@ class DIContainer:
                 atr_calculator=self.get_atr_calculator(),
                 volume_spike_detector=self.get_volume_spike_detector(),
                 signal_generator=self.get_signal_generator(),
-                # SOTA FIX: Inject market data repository for candle persistence (Phase 2)
+                # SOTA FIX: Inject market data repository for candle persistence
                 market_data_repository=self.get_market_data_repository(),
+                # CRITICAL FIX: Inject paper_service for trade execution!
+                paper_service=self.get_paper_trading_service(),
+                # SOTA FIX: Inject lifecycle_service for signal persistence!
+                lifecycle_service=self.get_signal_lifecycle_service(),
             )
-            self.logger.info(f"Created RealtimeService for {symbol} with all dependencies")
+            self.logger.info(f"✅ Created RealtimeService for {symbol} with all services injected!")
         
         return self._instances[key]
     

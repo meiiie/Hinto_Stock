@@ -38,6 +38,7 @@ from ..services.tp_calculator import TPCalculator
 from ..services.stop_loss_calculator import StopLossCalculator
 from ..services.confidence_calculator import ConfidenceCalculator
 from ..services.smart_entry_calculator import SmartEntryCalculator
+from .confluence_scorer import ConfluenceScorer, ConditionType, create_confluence_scorer_from_config
 
 
 class SignalGenerator:
@@ -67,17 +68,21 @@ class SignalGenerator:
         confidence_calculator: Optional[ConfidenceCalculator] = None,
         # NEW: Regime detector for Layer 0 filtering
         regime_detector: Optional[IRegimeDetector] = None,
-        # Config
+        # Config - SOTA: Now uses centralized StrategyConfig
         account_size: float = 10000.0,
         use_filters: bool = True,
-        strict_mode: bool = True,
-        use_regime_filter: bool = True  # NEW: Enable regime filter
+        strict_mode: bool = False,  # SOTA: Default to flexible
+        use_regime_filter: bool = True,
+        strategy_config: Optional[Any] = None  # NEW: SOTA centralized config
     ):
         """
         Initialize signal generator with dependency injection.
         
         All infrastructure dependencies are injected via constructor.
         Application-layer services (TPCalculator, etc.) can have defaults.
+        
+        SOTA Enhancement: Now accepts strategy_config for centralized
+        parameter management following institutional patterns.
         """
         # Store injected infrastructure dependencies
         self.volume_spike_detector = volume_spike_detector
@@ -98,12 +103,49 @@ class SignalGenerator:
         
         # NEW: Regime detector (Layer 0)
         self.regime_detector = regime_detector
-        self.use_regime_filter = use_regime_filter
+        
+        # SOTA: Store strategy config and use its values
+        self.strategy_config = strategy_config
+        
+        # Use strategy_config values if provided, otherwise use parameters
+        if strategy_config:
+            self.use_regime_filter = strategy_config.use_regime_filter
+            self.strict_mode = strategy_config.strict_mode
+            # Store additional config values for use in methods
+            self.bb_near_threshold = strategy_config.bb_near_threshold_pct
+            self.vwap_near_threshold = strategy_config.vwap_near_threshold_pct
+            self.regime_filter_mode = strategy_config.regime_filter_mode
+            self.regime_penalty_pct = strategy_config.regime_penalty_pct
+            self.min_confluence_score = strategy_config.min_confluence_score
+            self.stoch_oversold = strategy_config.stoch_oversold_threshold
+            self.stoch_overbought = strategy_config.stoch_overbought_threshold
+        else:
+            self.use_regime_filter = use_regime_filter
+            self.strict_mode = strict_mode
+            # Default values (from original hardcoded)
+            self.bb_near_threshold = 0.015
+            self.vwap_near_threshold = 0.01
+            self.regime_filter_mode = "block"
+            self.regime_penalty_pct = 0.0
+            self.min_confluence_score = 0.80
+            self.stoch_oversold = 20.0
+            self.stoch_overbought = 80.0
         
         self.account_size = account_size
         self.use_filters = use_filters
-        self.strict_mode = strict_mode
         self.logger = logging.getLogger(__name__)
+        
+        # SOTA: Initialize ConfluenceScorer for weighted signal scoring
+        # Note: Must be AFTER self.logger initialization
+        if strategy_config and strategy_config.use_weighted_confluence:
+            self.confluence_scorer = create_confluence_scorer_from_config(strategy_config)
+            self.use_weighted_confluence = True
+            self.logger.info(
+                f"✅ ConfluenceScorer initialized with min_score={self.min_confluence_score:.0%}"
+            )
+        else:
+            self.confluence_scorer = None
+            self.use_weighted_confluence = False
 
 
     
@@ -133,6 +175,8 @@ class SignalGenerator:
         try:
             # === LAYER 0: REGIME FILTER ===
             regime_result = None
+            regime_penalty = 0.0  # SOTA: Track penalty instead of blocking
+            
             if self.use_regime_filter and self.regime_detector:
                 regime_result = self.regime_detector.detect_regime(candles)
                 
@@ -142,10 +186,18 @@ class SignalGenerator:
                         f"(confidence: {regime_result.confidence:.2%})"
                     )
                     
-                    # BLOCK signals in RANGING regime
+                    # SOTA: Use penalty mode or block mode based on config
                     if regime_result.is_ranging:
-                        self.logger.info("🚫 Signal blocked: RANGING market regime")
-                        return None
+                        if self.regime_filter_mode == "block":
+                            # Original behavior: hard block
+                            self.logger.info("🚫 Signal blocked: RANGING market regime")
+                            return None
+                        else:
+                            # SOTA penalty mode: reduce confidence instead of blocking
+                            regime_penalty = self.regime_penalty_pct
+                            self.logger.info(
+                                f"⚠️ RANGING market: will apply {regime_penalty:.0%} confidence penalty"
+                            )
             
             # === LAYER 1: SIGNAL GENERATION ===
             # Get current candle
@@ -464,74 +516,120 @@ class SignalGenerator:
         """
         Check for BUY signal using Trend Pullback Strategy.
         
+        SOTA: Uses weighted ConfluenceScorer when enabled.
+        
         Logic:
-        1. Trend: Price > VWAP (Bullish Bias)
-        2. Setup: Price pullback to Lower Band or VWAP
-        3. Trigger: StochRSI Cross Up (K > D) in Oversold/Neutral zone
-        4. Confirmation: Green Candle + Volume
+        1. Trend: Price > VWAP (Bullish Bias) - Weight: 25%
+        2. Setup: Price pullback to Lower Band or VWAP - Weight: 30%
+        3. Trigger: StochRSI Cross Up - Weight: 25%
+        4. Confirmation: Green Candle + Volume - Weight: 20%
         """
         if not (vwap_result and bb_result and stoch_result):
             return None
             
         current_candle = candles[-1]
         reasons = []
-        conditions_met = 0
         
+        # === EVALUATE CONDITIONS ===
         # 1. Trend Filter: Price > VWAP
-        if current_price > vwap_result.vwap:
-            conditions_met += 1
-            reasons.append("Trend: Price > VWAP (Bullish)")
+        trend_aligned = current_price > vwap_result.vwap
+        if trend_aligned:
+            reasons.append("✓ Trend: Price > VWAP (Bullish)")
         elif self.strict_mode:
             return None  # Strict mode requires trend alignment
+        else:
+            reasons.append("✗ Trend: Price < VWAP")
             
         # 2. Setup: Pullback to Value Area (Lower Band or VWAP)
-        # Check if price is near Lower Band OR near VWAP
-        is_near_lower = self.bollinger_calculator.is_near_lower_band(current_price, bb_result.lower_band, threshold_pct=0.015)
-        is_near_vwap = self.vwap_calculator.is_above_vwap(current_price, vwap_result.vwap, buffer_pct=0.0) and \
-                       self.vwap_calculator.calculate_distance_from_vwap(current_price, vwap_result.vwap) < 1.0
-                       
-        if is_near_lower or is_near_vwap:
-            conditions_met += 1
-            reasons.append("Setup: Pullback to Value Area (Lower BB/VWAP)")
+        is_near_lower = self.bollinger_calculator.is_near_lower_band(
+            current_price, bb_result.lower_band, 
+            threshold_pct=self.bb_near_threshold
+        )
+        vwap_distance = self.vwap_calculator.calculate_distance_from_vwap(current_price, vwap_result.vwap)
+        is_near_vwap = (
+            self.vwap_calculator.is_above_vwap(current_price, vwap_result.vwap, buffer_pct=0.0) and 
+            vwap_distance < (self.vwap_near_threshold * 100)
+        )
+        pullback_zone = is_near_lower or is_near_vwap
+        if pullback_zone:
+            reasons.append("✓ Setup: Pullback to Value Area")
+        else:
+            reasons.append("✗ Setup: Not in pullback zone")
         
         # 3. Trigger: StochRSI Cross Up
-        # We want K crossing above D, and ideally K is not too high yet
-        # Master Spec: Threshold 30 (was 20)
-        if stoch_result.k_cross_up and stoch_result.k_value < 80:
-            conditions_met += 1
-            reasons.append(f"Trigger: StochRSI Cross Up (K={stoch_result.k_value:.1f})")
-        elif stoch_result.k_value < 30: # Oversold threshold 30
-             # Alternative trigger: Just being oversold is a setup, waiting for cross
-             reasons.append(f"Setup: StochRSI Oversold (K={stoch_result.k_value:.1f} < 30)")
+        momentum_trigger = stoch_result.k_cross_up and stoch_result.k_value < self.stoch_overbought
+        if momentum_trigger:
+            reasons.append(f"✓ Trigger: StochRSI Cross Up (K={stoch_result.k_value:.1f})")
+        elif stoch_result.k_value < self.stoch_oversold:
+            reasons.append(f"⚠ Setup: StochRSI Oversold (K={stoch_result.k_value:.1f})")
+        else:
+            reasons.append("✗ Trigger: No StochRSI cross")
         
-        # 4. Confirmation: Candle Color & Volume
+        # 4. Confirmation: Candle Color
         is_green = current_candle.close > current_candle.open
         if is_green:
-            conditions_met += 1
-            reasons.append("Candle: Green (Bullish)")
+            reasons.append("✓ Candle: Green (Bullish)")
+        else:
+            reasons.append("✗ Candle: Red")
             
-        # Volume confirmation
-        if volume_spike_result and volume_spike_result.is_spike:
-            conditions_met += 1
-            reasons.append(f"Volume: Spike {volume_spike_result.intensity.value}")
-            
-        # Decision Logic
-        # We need at least Trend + Trigger + One Confirmation
-        min_conditions = 4 if self.strict_mode else 3
+        # 5. Volume confirmation
+        volume_confirmed = volume_spike_result and volume_spike_result.is_spike
+        if volume_confirmed:
+            reasons.append(f"✓ Volume: Spike {volume_spike_result.intensity.value}")
+        else:
+            reasons.append("✗ Volume: Normal")
         
-        if conditions_met >= min_conditions:
-            # Calculate confidence
-            confidence = conditions_met / 5.0
+        # === DECIDE USING ConfluenceScorer OR Legacy Logic ===
+        if self.use_weighted_confluence and self.confluence_scorer:
+            # SOTA: Weighted confluence scoring
+            conditions = {
+                ConditionType.TREND_ALIGNMENT: trend_aligned,
+                ConditionType.PULLBACK_ZONE: pullback_zone,
+                ConditionType.MOMENTUM_TRIGGER: momentum_trigger,
+                ConditionType.CANDLE_CONFIRMATION: is_green,
+                ConditionType.VOLUME_CONFIRMATION: volume_confirmed,
+            }
             
-            return TradingSignal(
-                signal_type=SignalType.BUY,
-                confidence=confidence,
-                generated_at=current_candle.timestamp,
-                price=current_price,
-                reasons=reasons,
-                indicators=indicators or {}
-            )
+            result = self.confluence_scorer.calculate_score(conditions)
             
+            if result.is_valid:
+                # Signal passes weighted threshold
+                self.logger.info(
+                    f"📊 Confluence PASS: {result.score:.0%} >= {self.min_confluence_score:.0%}"
+                )
+                return TradingSignal(
+                    signal_type=SignalType.BUY,
+                    confidence=result.score,
+                    generated_at=current_candle.timestamp,
+                    price=current_price,
+                    reasons=reasons + [f"📊 Confluence: {result.score:.0%}"],
+                    indicators=indicators or {}
+                )
+            else:
+                self.logger.debug(
+                    f"📊 Confluence FAIL: {result.score:.0%} < {self.min_confluence_score:.0%}"
+                )
+                return None
+        else:
+            # Legacy: Count-based conditions
+            conditions_met = sum([
+                trend_aligned, pullback_zone, momentum_trigger, 
+                is_green, volume_confirmed
+            ])
+            
+            min_conditions = 4 if self.strict_mode else 3
+            
+            if conditions_met >= min_conditions:
+                confidence = conditions_met / 5.0
+                return TradingSignal(
+                    signal_type=SignalType.BUY,
+                    confidence=confidence,
+                    generated_at=current_candle.timestamp,
+                    price=current_price,
+                    reasons=reasons,
+                    indicators=indicators or {}
+                )
+                
         return None
     
     def _check_sell_conditions(
@@ -567,24 +665,30 @@ class SignalGenerator:
         elif self.strict_mode:
             return None  # Strict mode requires trend alignment
             
+            
         # 2. Setup: Rally to Value Area (Upper Band or VWAP)
-        # Check if price is near Upper Band OR near VWAP
-        is_near_upper = self.bollinger_calculator.is_near_upper_band(current_price, bb_result.upper_band, threshold_pct=0.015)
-        is_near_vwap = self.vwap_calculator.is_below_vwap(current_price, vwap_result.vwap, buffer_pct=0.0) and \
-                       abs(self.vwap_calculator.calculate_distance_from_vwap(current_price, vwap_result.vwap)) < 1.0
+        # SOTA: Use config-based thresholds instead of hardcoded
+        is_near_upper = self.bollinger_calculator.is_near_upper_band(
+            current_price, bb_result.upper_band, 
+            threshold_pct=self.bb_near_threshold  # SOTA: From config
+        )
+        vwap_distance = abs(self.vwap_calculator.calculate_distance_from_vwap(current_price, vwap_result.vwap))
+        is_near_vwap = (
+            self.vwap_calculator.is_below_vwap(current_price, vwap_result.vwap, buffer_pct=0.0) and 
+            vwap_distance < (self.vwap_near_threshold * 100)  # SOTA: From config
+        )
                        
         if is_near_upper or is_near_vwap:
             conditions_met += 1
             reasons.append("Setup: Rally to Value Area (Upper BB/VWAP)")
         
         # 3. Trigger: StochRSI Cross Down
-        # We want K crossing below D, and ideally K is not too low yet
-        # Master Spec: Threshold 70 (was 80)
-        if stoch_result.k_cross_down and stoch_result.k_value > 20:
+        # SOTA: Use config-based oversold threshold
+        if stoch_result.k_cross_down and stoch_result.k_value > self.stoch_oversold:
             conditions_met += 1
             reasons.append(f"Trigger: StochRSI Cross Down (K={stoch_result.k_value:.1f})")
-        elif stoch_result.k_value > 70: # Overbought threshold 70
-             reasons.append(f"Setup: StochRSI Overbought (K={stoch_result.k_value:.1f} > 70)")
+        elif stoch_result.k_value > self.stoch_overbought:  # SOTA: From config
+             reasons.append(f"Setup: StochRSI Overbought (K={stoch_result.k_value:.1f} > {self.stoch_overbought:.0f})")
         
         # 4. Confirmation: Candle Color & Volume
         is_red = current_candle.close < current_candle.open

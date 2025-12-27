@@ -12,6 +12,7 @@ Provides:
 
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
+from datetime import datetime
 import logging
 
 from src.api.dependencies import get_paper_trading_service, get_realtime_service
@@ -78,18 +79,43 @@ async def get_portfolio(
     paper_service: PaperTradingService = Depends(get_paper_trading_service)
 ):
     """
-    Get current portfolio status.
+    Get current portfolio status including pending orders.
     
     **Validates: Requirements 4.1, 4.4**
     
-    Returns virtual balance, equity, unrealized PnL, and open positions.
+    Returns virtual balance, equity, unrealized PnL, open positions, and pending orders.
     """
     # Get current price from realtime service
     latest_candle = service.get_latest_data('1m')
     current_price = latest_candle.close if latest_candle else 0.0
     
     portfolio = paper_service.get_portfolio(current_price=current_price)
-    return portfolio.to_dict()
+    
+    # Get pending orders and add to response
+    pending_orders = paper_service.repo.get_pending_orders()
+    
+    # Build response with pending orders included
+    response = portfolio.to_dict()
+    response['pending_orders'] = [
+        {
+            "id": order.id,
+            "signal_id": order.id[:8],  # Short ID for display
+            "symbol": order.symbol,
+            "side": order.side,
+            "entry_price": order.entry_price,
+            "size": order.quantity,
+            "stop_loss": order.stop_loss,
+            "take_profits": [order.take_profit] if order.take_profit else [],
+            "created_at": order.open_time.isoformat() if order.open_time else None,
+            "expires_at": None,  # Would need TTL calculation
+            "ttl_seconds": max(0, 45*60 - int((datetime.now() - order.open_time).total_seconds())) if order.open_time else 0
+        }
+        for order in pending_orders
+    ]
+    
+    logger.info(f"📊 Portfolio: {len(response.get('open_positions', []))} positions, {len(pending_orders)} pending")
+    
+    return response
 
 
 @router.post("/close/{position_id}")
@@ -118,6 +144,78 @@ async def close_position(
     return {
         "success": success,
         "message": "Position closed" if success else "Position not found or already closed"
+    }
+
+
+@router.get("/pending")
+async def get_pending_orders(
+    paper_service: PaperTradingService = Depends(get_paper_trading_service)
+):
+    """
+    Get all pending (unfilled) orders.
+    
+    Returns orders with status='PENDING' waiting for price to match.
+    """
+    pending_orders = paper_service.repo.get_pending_orders()
+    
+    return {
+        "count": len(pending_orders),
+        "orders": [
+            {
+                "id": order.id,
+                "symbol": order.symbol,
+                "side": order.side,
+                "status": order.status,
+                "entry_price": order.entry_price,
+                "quantity": order.quantity,
+                "margin": order.margin,
+                "stop_loss": order.stop_loss,
+                "take_profit": order.take_profit,
+                "open_time": order.open_time.isoformat() if order.open_time else None,
+                "size_usd": order.quantity * order.entry_price
+            }
+            for order in pending_orders
+        ]
+    }
+
+
+@router.get("/open")
+async def get_open_positions(
+    service: RealtimeService = Depends(get_realtime_service),
+    paper_service: PaperTradingService = Depends(get_paper_trading_service)
+):
+    """
+    Get all open (filled) positions.
+    
+    Returns active positions with unrealized PnL.
+    """
+    latest_candle = service.get_latest_data('1m')
+    current_price = latest_candle.close if latest_candle else 0.0
+    
+    positions = paper_service.get_positions()
+    
+    return {
+        "count": len(positions),
+        "current_price": current_price,
+        "positions": [
+            {
+                "id": pos.id,
+                "symbol": pos.symbol,
+                "side": pos.side,
+                "status": pos.status,
+                "entry_price": pos.entry_price,
+                "quantity": pos.quantity,
+                "margin": pos.margin,
+                "stop_loss": pos.stop_loss,
+                "take_profit": pos.take_profit,
+                "open_time": pos.open_time.isoformat() if pos.open_time else None,
+                "size_usd": pos.quantity * pos.entry_price,
+                "current_value": pos.quantity * current_price,
+                "unrealized_pnl": (current_price - pos.entry_price) * pos.quantity if pos.side == 'LONG' else (pos.entry_price - current_price) * pos.quantity,
+                "roe_pct": pos.calculate_roe(current_price) if hasattr(pos, 'calculate_roe') else 0.0
+            }
+            for pos in positions
+        ]
     }
 
 
@@ -267,7 +365,7 @@ async def simulate_signal(
     trading_signal = TradingSignal(
         signal_type=sig_type,
         confidence=0.75,  # Default confidence for test
-        timestamp=datetime.now(),
+        generated_at=datetime.now(),  # FIX: Use correct field name
         price=current_price,
         entry_price=current_price,
         stop_loss=stop_loss,
