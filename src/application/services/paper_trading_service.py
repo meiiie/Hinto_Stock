@@ -8,6 +8,8 @@ from src.domain.entities.trading_signal import TradingSignal, SignalType
 from src.domain.entities.portfolio import Portfolio
 from src.domain.entities.performance_metrics import PerformanceMetrics
 from src.domain.repositories.i_order_repository import IOrderRepository
+# SOTA FIX: Import Market Repository for Price Oracle
+from src.infrastructure.persistence.sqlite_market_data_repository import SQLiteMarketDataRepository
 import logging
 
 logger = logging.getLogger(__name__)
@@ -54,8 +56,9 @@ class PaperTradingService:
     Simulates Futures trading with Leverage (Default 1x).
     """
     
-    def __init__(self, repository: IOrderRepository):
+    def __init__(self, repository: IOrderRepository, market_data_repository: Optional[SQLiteMarketDataRepository] = None):
         self.repo = repository
+        self.market_data_repo = market_data_repository
         self.MAX_POSITIONS = 3
         self.RISK_PER_TRADE = 0.015  # 1.5% risk per trade (Tuned)
         self.LEVERAGE = 1
@@ -81,16 +84,86 @@ class PaperTradingService:
         """Get all OPEN positions"""
         return self.repo.get_active_orders()
 
-    def calculate_unrealized_pnl(self, current_price: float) -> float:
-        """Calculate Total Unrealized PnL of all open positions"""
+    def calculate_unrealized_pnl(self, current_price_override: float = 0.0) -> float:
+        """
+        Calculate Total Unrealized PnL of all open positions.
+        
+        SOTA FIX: 
+        Uses 'Price Oracle' (MarketDataRepository) to fetch symbol-specific prices.
+        Ignores 'current_price_override' unless strictly necessary (single symbol context).
+        """
         positions = self.get_positions()
         total_pnl = 0.0
+        
         for pos in positions:
-            total_pnl += pos.calculate_unrealized_pnl(current_price)
+            price_to_use = 0.0
+            
+            # 1. Try to get price from Repository (Priority 1)
+            if self.market_data_repo:
+                candles = self.market_data_repo.get_latest_candles(pos.symbol, '1m', 1)
+                if candles and len(candles) > 0:
+                    price_to_use = candles[0].close
+            
+            # 2. Fallback to override if logic allows (Weak fallback)
+            # Only if we couldn't get price from repo and override is provided
+            if price_to_use == 0.0 and current_price_override > 0:
+                 price_to_use = current_price_override
+                 
+            # 3. Calculate PnL for this position
+            if price_to_use > 0:
+                total_pnl += pos.calculate_unrealized_pnl(price_to_use)
+                
         return total_pnl
 
-    def get_margin_balance(self, current_price: float) -> float:
+    def get_positions_with_pnl(self) -> List[dict]:
+        """
+        Get all open positions enriched with PnL and current price.
+        
+        SOTA: Returns a View Model (Dictionary) ready for API response.
+        Uses correct per-symbol pricing from Repository.
+        """
+        positions = self.get_positions()
+        enriched = []
+        
+        for pos in positions:
+            current_price = 0.0
+            
+            # Get Price from Repo
+            if self.market_data_repo:
+                candles = self.market_data_repo.get_latest_candles(pos.symbol, '1m', 1)
+                if candles and len(candles) > 0:
+                    current_price = candles[0].close
+            
+            # Fallback (Should not happen in prod if data exists)
+            if current_price == 0.0:
+                 current_price = pos.entry_price # Prevent division by zero / crazy numbers
+            
+            pnl = pos.calculate_unrealized_pnl(current_price)
+            roe = pos.calculate_roe(current_price)
+            
+            enriched.append({
+                "id": pos.id,
+                "symbol": pos.symbol,
+                "side": pos.side,
+                "status": pos.status,
+                "entry_price": pos.entry_price,
+                "quantity": pos.quantity,
+                "margin": pos.margin,
+                "stop_loss": pos.stop_loss,
+                "take_profit": pos.take_profit,
+                "open_time": pos.open_time.isoformat() if pos.open_time else None,
+                "size_usd": pos.quantity * pos.entry_price,
+                "current_price": current_price,
+                "current_value": pos.quantity * current_price,
+                "unrealized_pnl": pnl,
+                "roe_pct": roe
+            })
+            
+        return enriched
+
+    def get_margin_balance(self, current_price: float = 0.0) -> float:
         """Margin Balance = Wallet Balance + Unrealized PnL"""
+        # SOTA: calculate_unrealized_pnl now handles price lookup internally
         return self.get_wallet_balance() + self.calculate_unrealized_pnl(current_price)
 
     def get_available_balance(self, current_price: float) -> float:
@@ -260,13 +333,18 @@ class PaperTradingService:
         self.repo.reset_database()
         logger.info("🔄 PAPER TRADING RESET: Database cleared and balance reset to $10,000")
 
-    def process_market_data(self, current_price: float, high: float, low: float) -> None:
+    def process_market_data(self, current_price: float, high: float, low: float, symbol: str) -> None:
         """
         1. Check PENDING orders -> Fill if price hit (Merge if needed) OR TTL Expire.
         2. Check OPEN positions -> SL/TP/Liq.
+        
+        SOTA FIX: Added 'symbol' parameter to filter processing.
+        Prevents applying BTC prices to ETH positions (Cross-Talk Bug).
         """
-        # A. Handle PENDING Orders
-        pending_orders = self.repo.get_pending_orders()
+        # A. Handle PENDING Orders (Filter by Symbol)
+        all_pending = self.repo.get_pending_orders()
+        pending_orders = [o for o in all_pending if o.symbol.lower() == symbol.lower()]
+        
         TTL_SECONDS = 45 * 60 # 45 minutes (3 candles of 15m)
 
         for order in pending_orders:
@@ -339,8 +417,9 @@ class PaperTradingService:
                         except Exception as e:
                             logger.error(f"Error in on_order_filled callback: {e}")
 
-        # B. Handle OPEN Positions
-        active_positions = self.get_positions()
+        # B. Handle OPEN Positions (Filter by Symbol)
+        all_positions = self.get_positions()
+        active_positions = [p for p in all_positions if p.symbol.lower() == symbol.lower()]
 
         for pos in active_positions:
             exit_price = None

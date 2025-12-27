@@ -564,7 +564,8 @@ class RealtimeService:
             self.paper_service.process_market_data(
                 current_price=candle.close,
                 high=candle.high,
-                low=candle.low
+                low=candle.low,
+                symbol=self.symbol
             )
         
         # Also add if explicitly closed by Binance
@@ -746,7 +747,8 @@ class RealtimeService:
         
         try:
             signal = self.signal_generator.generate_signal(
-                list(self._candles_1m)
+                list(self._candles_1m),
+                symbol=self.symbol
             )
             
             if signal and signal.signal_type.value != 'neutral':
@@ -767,7 +769,8 @@ class RealtimeService:
         """Generate signals on 15m timeframe."""
         try:
             signal = self.signal_generator.generate_signal(
-                list(self._candles_15m)
+                list(self._candles_15m),
+                symbol=self.symbol
             )
             
             if signal and signal.signal_type.value != 'neutral':
@@ -781,7 +784,8 @@ class RealtimeService:
         """Generate signals on 1h timeframe."""
         try:
             signal = self.signal_generator.generate_signal(
-                list(self._candles_1h)
+                list(self._candles_1h),
+                symbol=self.symbol
             )
             
             if signal and signal.signal_type.value != 'neutral':

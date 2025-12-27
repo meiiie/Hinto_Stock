@@ -65,6 +65,7 @@ class TradingSignal:
         outcome: Trade result tracking
     """
     # Core fields
+    symbol: str  # SOTA FIX: Signal must know its symbol
     signal_type: SignalType
     confidence: float
     price: float
@@ -143,6 +144,7 @@ class TradingSignal:
         """Serialize for API response."""
         return {
             "id": self.id,
+            "symbol": self.symbol,  # SOTA FIX: Include symbol in JSON
             "signal_type": self.signal_type.value,
             "status": self.status.value,
             "confidence": self.confidence,

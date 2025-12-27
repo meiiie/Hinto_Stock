@@ -181,7 +181,7 @@ function App() {
           const tradingSignal: TradingSignal = {
             id: signalId,
             type: wsSignal.type as 'BUY' | 'SELL',
-            symbol: 'btcusdt',
+            symbol: wsSignal.symbol || selectedSymbol || 'btcusdt',
             timestamp: wsSignal.timestamp || new Date().toISOString(),
             entry: price,
             stopLoss: wsSignal.stop_loss || (isBuy ? price * 0.985 : price * 1.015),
@@ -670,7 +670,7 @@ function App() {
                             setActiveSignal({
                               id: result.trade_id || Date.now().toString(),
                               type: signalType,
-                              symbol: 'btcusdt',
+                              symbol: selectedSymbol || 'btcusdt',
                               timestamp: new Date().toISOString(),
                               entry: price,
                               stopLoss: result.stop_loss || (isBuy ? price * 0.985 : price * 1.015),

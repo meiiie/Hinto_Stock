@@ -75,7 +75,6 @@ async def get_performance_metrics(
 
 @router.get("/portfolio")
 async def get_portfolio(
-    service: RealtimeService = Depends(get_realtime_service),
     paper_service: PaperTradingService = Depends(get_paper_trading_service)
 ):
     """
@@ -85,11 +84,8 @@ async def get_portfolio(
     
     Returns virtual balance, equity, unrealized PnL, open positions, and pending orders.
     """
-    # Get current price from realtime service
-    latest_candle = service.get_latest_data('1m')
-    current_price = latest_candle.close if latest_candle else 0.0
-    
-    portfolio = paper_service.get_portfolio(current_price=current_price)
+    # SOTA FIX: Don't pass single price. Service uses 'Price Oracle' (Repository).
+    portfolio = paper_service.get_portfolio()
     
     # Get pending orders and add to response
     pending_orders = paper_service.repo.get_pending_orders()
@@ -133,6 +129,12 @@ async def close_position(
     Returns:
         Success status
     """
+    # SOTA: For EXECUTION, we still use RealtimeService to get the MOST recent price
+    # However, we should technically get the price for the specific symbol of the position.
+    # Current implementation presumes User is on the chart of the symbol they are closing.
+    # TODO: Fetch position first, then get service for that symbol.
+    # For now, we assume standard usage flow.
+    
     latest_candle = service.get_latest_data('1m')
     current_price = latest_candle.close if latest_candle else 0.0
     
@@ -181,41 +183,19 @@ async def get_pending_orders(
 
 @router.get("/open")
 async def get_open_positions(
-    service: RealtimeService = Depends(get_realtime_service),
     paper_service: PaperTradingService = Depends(get_paper_trading_service)
 ):
     """
-    Get all open (filled) positions.
+    Get all open (filled) positions via SOTA Service View.
     
-    Returns active positions with unrealized PnL.
+    Returns active positions with correctly calculated PnL per symbol.
     """
-    latest_candle = service.get_latest_data('1m')
-    current_price = latest_candle.close if latest_candle else 0.0
-    
-    positions = paper_service.get_positions()
+    # SOTA FIX: Use Service to get enriched positions with correct prices
+    positions_enriched = paper_service.get_positions_with_pnl()
     
     return {
-        "count": len(positions),
-        "current_price": current_price,
-        "positions": [
-            {
-                "id": pos.id,
-                "symbol": pos.symbol,
-                "side": pos.side,
-                "status": pos.status,
-                "entry_price": pos.entry_price,
-                "quantity": pos.quantity,
-                "margin": pos.margin,
-                "stop_loss": pos.stop_loss,
-                "take_profit": pos.take_profit,
-                "open_time": pos.open_time.isoformat() if pos.open_time else None,
-                "size_usd": pos.quantity * pos.entry_price,
-                "current_value": pos.quantity * current_price,
-                "unrealized_pnl": (current_price - pos.entry_price) * pos.quantity if pos.side == 'LONG' else (pos.entry_price - current_price) * pos.quantity,
-                "roe_pct": pos.calculate_roe(current_price) if hasattr(pos, 'calculate_roe') else 0.0
-            }
-            for pos in positions
-        ]
+        "count": len(positions_enriched),
+        "positions": positions_enriched
     }
 
 

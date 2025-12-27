@@ -40,6 +40,7 @@ export interface MarketData {
 export interface Signal {
     id?: string;
     type: 'BUY' | 'SELL';
+    symbol?: string; // SOTA FIX: Signal carries its symbol
     price: number;
     entry_price: number;
     stop_loss: number;

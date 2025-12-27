@@ -149,7 +149,7 @@ class SignalGenerator:
 
 
     
-    def generate_signal(self, candles: List[Candle]) -> Optional[TradingSignal]:
+    def generate_signal(self, candles: List[Candle], symbol: str) -> Optional[TradingSignal]:
         """
         Generate trading signal based on current market conditions.
         
@@ -164,6 +164,7 @@ class SignalGenerator:
         
         Args:
             candles: List of Candle entities (chronological order)
+            symbol: Symbol string for the signal (SOTA Requirement)
         
         Returns:
             TradingSignal or None if insufficient data or filters reject
@@ -310,7 +311,7 @@ class SignalGenerator:
             
             # Generate buy signal
             buy_signal = self._check_buy_conditions(
-                candles, current_price, vwap_result, bb_result, stoch_result, volume_spike_result, indicators
+                candles, current_price, vwap_result, bb_result, stoch_result, volume_spike_result, indicators, symbol
             )
             
             if buy_signal:
@@ -324,7 +325,7 @@ class SignalGenerator:
             
             # Generate sell signal
             sell_signal = self._check_sell_conditions(
-                candles, current_price, vwap_result, bb_result, stoch_result, volume_spike_result, indicators
+                candles, current_price, vwap_result, bb_result, stoch_result, volume_spike_result, indicators, symbol
             )
             
             if sell_signal:
@@ -338,6 +339,7 @@ class SignalGenerator:
             
             # No signal - return neutral
             return TradingSignal(
+                symbol=symbol,
                 signal_type=SignalType.NEUTRAL,
                 confidence=0.0,
                 generated_at=current_candle.timestamp,  # FIX: Use candle timestamp
@@ -511,7 +513,8 @@ class SignalGenerator:
         bb_result: Optional[Any],
         stoch_result: Optional[Any],
         volume_spike_result: Optional[Any],  # VolumeSpikeResult
-        indicators: Dict[str, Any] = None
+        indicators: Dict[str, Any] = None,
+        symbol: str = "UNKNOWN"
     ) -> Optional[TradingSignal]:
         """
         Check for BUY signal using Trend Pullback Strategy.
@@ -598,6 +601,7 @@ class SignalGenerator:
                     f"📊 Confluence PASS: {result.score:.0%} >= {self.min_confluence_score:.0%}"
                 )
                 return TradingSignal(
+                    symbol=symbol,
                     signal_type=SignalType.BUY,
                     confidence=result.score,
                     generated_at=current_candle.timestamp,
@@ -622,6 +626,7 @@ class SignalGenerator:
             if conditions_met >= min_conditions:
                 confidence = conditions_met / 5.0
                 return TradingSignal(
+                    symbol=symbol,
                     signal_type=SignalType.BUY,
                     confidence=confidence,
                     generated_at=current_candle.timestamp,
@@ -640,7 +645,8 @@ class SignalGenerator:
         bb_result: Optional[Any],
         stoch_result: Optional[Any],
         volume_spike_result: Optional[Any],  # VolumeSpikeResult
-        indicators: Dict[str, Any] = None
+        indicators: Dict[str, Any] = None,
+        symbol: str = "UNKNOWN"
     ) -> Optional[TradingSignal]:
         """
         Check for SELL signal using Trend Pullback Strategy.
@@ -709,6 +715,7 @@ class SignalGenerator:
             confidence = conditions_met / 5.0
             
             return TradingSignal(
+                symbol=symbol,
                 signal_type=SignalType.SELL,
                 confidence=confidence,
                 generated_at=current_candle.timestamp,

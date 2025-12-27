@@ -940,7 +940,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <span style={{ fontSize: '18px', fontWeight: 700, color: BINANCE_COLORS.textPrimary }}>
-                        BTC/USDT
+                        {activeSymbol.replace('usdt', '/USDT').toUpperCase()}
                     </span>
                     <span style={{
                         fontSize: '12px',

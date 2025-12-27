@@ -565,8 +565,12 @@ class DIContainer:
             from ..application.services.paper_trading_service import PaperTradingService
             
             order_repository = self.get_order_repository()
+            # SOTA FIX: Inject MarketDataRepository for multi-symbol pricing
+            market_data_repository = self.get_market_data_repository()
+            
             self._instances['paper_trading_service'] = PaperTradingService(
-                repository=order_repository  # FIX: correct argument name
+                repository=order_repository,
+                market_data_repository=market_data_repository
             )
             self.logger.info("Created PaperTradingService with order repository")
         
