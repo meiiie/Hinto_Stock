@@ -177,39 +177,45 @@ class RealtimeService:
         self._event_bus = event_bus
         self.logger.info("✅ EventBus connected to RealtimeService")
     
-    async def start(self) -> None:
+    async def start(self, shared_client_mode: bool = False) -> None:
         """
         Start the real-time service.
         
         This will:
         1. Load historical data
-        2. Connect to WebSocket
+        2. Connect to WebSocket (unless shared_client_mode=True)
         3. Start receiving real-time data
         4. Begin analysis and signal generation
+        
+        Args:
+            shared_client_mode: If True, skip WebSocket connection (data comes from SharedBinanceClient)
         """
         if self._is_running:
             self.logger.warning("Service already running")
             return
         
-        self.logger.info(f"Starting real-time service for {self.symbol}")
+        self.logger.info(f"Starting real-time service for {self.symbol} (shared_mode={shared_client_mode})")
         
         try:
             # Load historical data first
             self.logger.info("Loading historical data...")
             await self._load_historical_data()
             
-            # Register callbacks
-            self.websocket_client.subscribe_candle(self._on_candle_received)
+            # Register aggregator callbacks
             self.aggregator.on_15m_complete(self._on_15m_complete)
             self.aggregator.on_1h_complete(self._on_1h_complete)
             
-            # Connect to WebSocket with MULTI-STREAM for all timeframes
-            # SOTA: Binance Combined Stream gives native 15m/1h candles
-            await self.websocket_client.connect(
-                symbol=self.symbol,
-                interval=self.interval,  # Legacy (1m)
-                intervals=['1m', '15m', '1h']  # SOTA: Multi-stream
-            )
+            # SOTA: Skip WebSocket connection if using SharedBinanceClient
+            if shared_client_mode:
+                self.logger.info("📡 Using SharedBinanceClient for data streaming")
+            else:
+                # Legacy: Connect own WebSocket
+                self.websocket_client.subscribe_candle(self._on_candle_received)
+                await self.websocket_client.connect(
+                    symbol=self.symbol,
+                    interval=self.interval,
+                    intervals=['1m', '15m', '1h']
+                )
             
             self._is_running = True
             self.logger.info("✅ Real-time service started successfully")
@@ -239,7 +245,7 @@ class RealtimeService:
         if self._market_data_repository:
             try:
                 market_data_list = self._market_data_repository.get_latest_candles(
-                    timeframe, limit
+                    self.symbol, timeframe, limit
                 )
                 local_candles = [md.candle for md in market_data_list]
                 # Sort ascending (oldest first) - SQLite returns DESC
@@ -281,7 +287,7 @@ class RealtimeService:
                     self.logger.info(f"💾 Write-through: Saving {len(new_candles)} new {timeframe} candles to SQLite")
                     for candle in new_candles:
                         try:
-                            self._market_data_repository.save_candle_simple(candle, timeframe)
+                            self._market_data_repository.save_candle_simple(candle, timeframe, self.symbol)
                         except Exception as e:
                             self.logger.error(f"Failed to save candle: {e}")
             
@@ -441,7 +447,7 @@ class RealtimeService:
         saved_count = 0
         for candle in candles:
             try:
-                self._market_data_repository.save_candle_simple(candle, timeframe)
+                self._market_data_repository.save_candle_simple(candle, timeframe, self.symbol)
                 saved_count += 1
             except Exception:
                 pass  # Ignore duplicates
@@ -473,6 +479,25 @@ class RealtimeService:
             
         except Exception as e:
             self.logger.error(f"Error stopping service: {e}")
+    
+    def on_candle_update(self, candle: Candle, metadata: Dict) -> None:
+        """
+        Public callback for SharedBinanceClient data routing.
+        
+        SOTA: This is called by SharedBinanceClient when data arrives
+        for this service's symbol. Delegates to internal _on_candle_received.
+        
+        Args:
+            candle: Candle entity
+            metadata: Metadata (is_closed, symbol, interval, etc.)
+        """
+        # Verify this candle is for our symbol
+        incoming_symbol = metadata.get('symbol', '').lower()
+        if incoming_symbol and incoming_symbol != self.symbol.lower():
+            self.logger.debug(f"Ignoring candle for {incoming_symbol} (expected {self.symbol})")
+            return
+        
+        self._on_candle_received(candle, metadata)
     
     def _on_candle_received(self, candle: Candle, metadata: Dict) -> None:
         """
@@ -579,7 +604,7 @@ class RealtimeService:
             # Persist to SQLite
             if self._market_data_repository:
                 try:
-                    self._market_data_repository.save_candle_simple(candle, '15m')
+                    self._market_data_repository.save_candle_simple(candle, '15m', self.symbol)
                     self.logger.debug(f"📦 Persisted 15m candle from stream: {candle.timestamp}")
                 except Exception as e:
                     self.logger.error(f"Failed to persist 15m candle: {e}")
@@ -619,7 +644,7 @@ class RealtimeService:
             # Persist to SQLite
             if self._market_data_repository:
                 try:
-                    self._market_data_repository.save_candle_simple(candle, '1h')
+                    self._market_data_repository.save_candle_simple(candle, '1h', self.symbol)
                     self.logger.debug(f"📦 Persisted 1h candle from stream: {candle.timestamp}")
                 except Exception as e:
                     self.logger.error(f"Failed to persist 1h candle: {e}")
@@ -653,7 +678,7 @@ class RealtimeService:
         # SOTA FIX: Persist closed 15m candles to SQLite (Phase 2)
         if self._market_data_repository:
             try:
-                self._market_data_repository.save_candle_simple(candle, '15m')
+                self._market_data_repository.save_candle_simple(candle, '15m', self.symbol)
                 self.logger.debug(f"📦 Persisted 15m candle: {candle.timestamp}")
             except Exception as e:
                 self.logger.error(f"Failed to persist 15m candle: {e}")
@@ -691,7 +716,7 @@ class RealtimeService:
         # SOTA FIX: Persist closed 1h candles to SQLite (Phase 2)
         if self._market_data_repository:
             try:
-                self._market_data_repository.save_candle_simple(candle, '1h')
+                self._market_data_repository.save_candle_simple(candle, '1h', self.symbol)
                 self.logger.debug(f"📦 Persisted 1h candle: {candle.timestamp}")
             except Exception as e:
                 self.logger.error(f"Failed to persist 1h candle: {e}")

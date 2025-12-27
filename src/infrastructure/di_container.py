@@ -439,16 +439,20 @@ class DIContainer:
     
     def get_data_aggregator(self) -> DataAggregator:
         """
-        Get DataAggregator instance (singleton).
+        Get DataAggregator instance (Transient).
+        
+        CRITICAL FIX (Phase 6): Must be transient (new instance per call) because 
+        it stores stateful buffers (_candles_1m, _buffer_15m). Sharing it across 
+        RealtimeServices causes data mixing between symbols (e.g., BTC data 
+        polluting ETH 15m candles).
         
         Returns:
-            DataAggregator instance
+            New DataAggregator instance
         """
-        if 'data_aggregator' not in self._instances:
-            self._instances['data_aggregator'] = DataAggregator()
-            self.logger.debug("Created DataAggregator instance")
-        
-        return self._instances['data_aggregator']
+        # SOTA: Return new instance every time (Transient Scope)
+        instance = DataAggregator()
+        self.logger.debug(f"Created new isolated DataAggregator instance: {id(instance)}")
+        return instance
     
     def get_vwap_calculator(self) -> VWAPCalculator:
         """Get VWAPCalculator instance (singleton)."""

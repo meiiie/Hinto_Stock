@@ -21,7 +21,7 @@ import json
 import asyncio
 import logging
 
-from src.api.dependencies import get_realtime_service, get_market_data_repository
+from src.api.dependencies import get_realtime_service, get_realtime_service_for_symbol, get_market_data_repository
 from src.api.websocket_manager import get_websocket_manager, WebSocketManager
 from src.api.event_bus import get_event_bus
 from src.application.services.realtime_service import RealtimeService
@@ -50,7 +50,6 @@ logger = logging.getLogger(__name__)
 async def websocket_stream(
     websocket: WebSocket,
     symbol: str,
-    service: RealtimeService = Depends(get_realtime_service)
 ):
     """
     WebSocket endpoint for real-time market data streaming.
@@ -70,6 +69,8 @@ async def websocket_stream(
     Args:
         symbol: Trading pair symbol (e.g., 'btcusdt')
     """
+    # SOTA Multi-Token FIX: Get service for the requested symbol, NOT hardcoded btcusdt
+    service = get_realtime_service_for_symbol(symbol)
     manager = get_websocket_manager()
     
     # Connect client to WebSocketManager
@@ -161,13 +162,14 @@ async def websocket_stream(
 async def websocket_market_legacy(
     websocket: WebSocket,
     symbol: str,
-    service: RealtimeService = Depends(get_realtime_service)
 ):
     """
     Legacy WebSocket endpoint (for backward compatibility).
     Redirects to /stream/{symbol}.
     """
-    await websocket_stream(websocket, symbol, service)
+    # SOTA Multi-Token FIX: Get service for the requested symbol
+    service = get_realtime_service_for_symbol(symbol)
+    await websocket_stream(websocket, symbol)
 
 
 @router.get("/history/{symbol}")
@@ -175,29 +177,31 @@ async def get_market_history(
     symbol: str,
     timeframe: str = Query(default='15m', pattern='^(1m|15m|1h)$'),
     limit: int = Query(default=100, ge=1, le=1000),
-    service: RealtimeService = Depends(get_realtime_service),
     repo: SQLiteMarketDataRepository = Depends(get_market_data_repository)
 ):
     """
     Get historical market data with hybrid data source.
     
-    SOTA Phase 3: SQLite first, Binance fallback.
+    SOTA Multi-Token: Returns data for the requested symbol.
     
     **Validates: Requirements 5.4, 2.1**
     
     Args:
-        symbol: Trading pair symbol
+        symbol: Trading pair symbol (e.g., btcusdt, ethusdt)
         timeframe: Candle timeframe (1m, 15m, 1h)
         limit: Number of candles to return (max 1000)
         
     Returns:
         List of candles with VWAP and Bollinger Bands
     """
-    # Step 1: Try SQLite first
+    # SOTA: Get service for the specific symbol
+    service = get_realtime_service_for_symbol(symbol)
+    
+    # Step 1: Try SQLite first (SOTA Multi-Symbol: per-symbol tables)
     try:
-        sqlite_candles = repo.get_latest_candles(timeframe, limit)
+        sqlite_candles = repo.get_latest_candles(symbol.lower(), timeframe, limit)
         if len(sqlite_candles) >= limit * 0.8:  # 80% threshold
-            logger.debug(f"📦 SQLite hit: {len(sqlite_candles)} candles for {timeframe}")
+            logger.debug(f"📦 SQLite hit: {len(sqlite_candles)} candles for {symbol}/{timeframe}")
             # Sort ascending (SQLite returns DESC)
             sorted_candles = sorted(sqlite_candles, key=lambda c: c.candle.timestamp)
             
@@ -209,7 +213,7 @@ async def get_market_history(
         logger.warning(f"SQLite query failed: {e}")
     
     # Step 2: Fallback to service (Binance REST)
-    logger.debug(f"📡 SQLite miss, falling back to Binance for {timeframe}")
+    logger.debug(f"📡 SQLite miss, falling back to Binance for {symbol}/{timeframe}")
     return service.get_historical_data_with_indicators(timeframe, limit)
 
 
@@ -249,13 +253,14 @@ async def get_market_history_rest(
     symbol: str = Query(default='btcusdt'),
     timeframe: str = Query(default='15m', pattern='^(1m|15m|1h)$'),
     limit: int = Query(default=100, ge=1, le=1000),
-    service: RealtimeService = Depends(get_realtime_service),
     repo: SQLiteMarketDataRepository = Depends(get_market_data_repository)
 ):
     """
     Get historical market data (REST endpoint for frontend).
     
     SOTA Phase 3: SQLite first, Binance fallback.
+    
+    SOTA Multi-Token: Now correctly uses symbol-specific service.
     
     Used by useMarketData hook for data gap filling after reconnect.
     
@@ -267,9 +272,12 @@ async def get_market_history_rest(
     Returns:
         List of candles with indicators
     """
-    # Step 1: Try SQLite first
+    # SOTA Multi-Token FIX: Get service for the requested symbol
+    service = get_realtime_service_for_symbol(symbol)
+    
+    # Step 1: Try SQLite first (SOTA Multi-Symbol: per-symbol tables)
     try:
-        sqlite_candles = repo.get_latest_candles(timeframe, limit)
+        sqlite_candles = repo.get_latest_candles(symbol.lower(), timeframe, limit)
         if len(sqlite_candles) >= limit * 0.8:  # 80% threshold
             logger.debug(f"📦 SQLite hit: {len(sqlite_candles)} candles for {timeframe}")
             sorted_candles = sorted(sqlite_candles, key=lambda c: c.candle.timestamp)
@@ -283,3 +291,54 @@ async def get_market_history_rest(
     # Step 2: Fallback to service (Binance REST)
     logger.debug(f"📡 SQLite miss, falling back to Binance for {timeframe}")
     return service.get_historical_data_with_indicators(timeframe, limit)
+
+
+@market_router.get("/symbols")
+async def get_supported_symbols():
+    """
+    Get list of supported trading symbols.
+    
+    Returns all symbols that are actively being monitored.
+    Frontend uses this to populate the token selector dropdown.
+    
+    Returns:
+        List of symbol info with name and base currency
+    """
+    from src.config import MultiTokenConfig
+    
+    config = MultiTokenConfig()
+    
+    # Map symbols to displayable info
+    symbol_info = []
+    for symbol in config.symbols:
+        base = symbol.replace("USDT", "")
+        symbol_info.append({
+            "symbol": symbol.lower(),
+            "display": symbol,
+            "base": base,
+            "quote": "USDT",
+            "name": _get_token_name(base),
+        })
+    
+    return {
+        "symbols": symbol_info,
+        "count": len(symbol_info),
+        "default": config.symbols[0].lower() if config.symbols else "btcusdt"
+    }
+
+
+def _get_token_name(base: str) -> str:
+    """Get full name for token base currency."""
+    names = {
+        "BTC": "Bitcoin",
+        "ETH": "Ethereum",
+        "SOL": "Solana",
+        "BNB": "BNB",
+        "TAO": "Bittensor",
+        "FET": "Fetch.ai",
+        "ONDO": "Ondo Finance",
+        "XRP": "Ripple",
+        "ADA": "Cardano",
+        "DOGE": "Dogecoin",
+    }
+    return names.get(base, base)

@@ -390,6 +390,18 @@ class TPCalculator:
         tp2 = entry_price - (risk * 2.5)  # 2.5R
         tp3 = entry_price - (risk * 3.5)  # 3.5R
         
+        # SOTA FIX: Ensure all TP levels stay positive (minimum 0.5% of entry)
+        min_tp = entry_price * 0.005  # Minimum 0.5% of entry price
+        tp1 = max(tp1, min_tp)
+        tp2 = max(tp2, min_tp * 0.8)
+        tp3 = max(tp3, min_tp * 0.6)
+        
+        # Ensure proper ordering: tp1 > tp2 > tp3
+        if tp2 >= tp1:
+            tp2 = tp1 * 0.98
+        if tp3 >= tp2:
+            tp3 = tp2 * 0.98
+        
         tp_levels = TPLevels(
             tp1=tp1,
             tp2=tp2,

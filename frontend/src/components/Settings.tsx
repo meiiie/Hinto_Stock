@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { THEME } from '../styles/theme';
+import { apiUrl, ENDPOINTS } from '../config/api';
 
 interface TradingSettings {
     risk_percent: number;
@@ -29,7 +30,7 @@ const Settings: React.FC = () => {
 
     const fetchSettings = useCallback(async () => {
         try {
-            const response = await fetch('http://127.0.0.1:8000/settings');
+            const response = await fetch(apiUrl(ENDPOINTS.SETTINGS));
             if (response.ok) {
                 const data = await response.json();
                 setSettings(data);
@@ -50,7 +51,7 @@ const Settings: React.FC = () => {
         setError(null);
         setSaveSuccess(false);
         try {
-            const response = await fetch('http://127.0.0.1:8000/settings', {
+            const response = await fetch(apiUrl(ENDPOINTS.SETTINGS), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(settings)
@@ -73,7 +74,7 @@ const Settings: React.FC = () => {
             return;
         }
         try {
-            const response = await fetch('http://127.0.0.1:8000/trades/reset', { method: 'POST' });
+            const response = await fetch(apiUrl(ENDPOINTS.RESET_TRADES), { method: 'POST' });
             if (response.ok) {
                 alert('Đã reset tài khoản thành công!');
             }
@@ -85,7 +86,7 @@ const Settings: React.FC = () => {
     const handleSimulateSignal = async (signalType: 'BUY' | 'SELL') => {
         setIsSimulating(true);
         try {
-            const response = await fetch('http://127.0.0.1:8000/trades/simulate', {
+            const response = await fetch(apiUrl(ENDPOINTS.SIMULATE_TRADE), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ signal_type: signalType })
@@ -195,7 +196,7 @@ const Settings: React.FC = () => {
             {/* Risk Management */}
             <div style={sectionStyle}>
                 <h3 style={{ fontSize: '14px', fontWeight: 600, color: THEME.text.secondary, margin: 0 }}>Quản lý rủi ro</h3>
-                
+
                 <div style={gridStyle}>
                     <div>
                         <label style={labelStyle}>Rủi ro mỗi lệnh (%)</label>
@@ -268,7 +269,7 @@ const Settings: React.FC = () => {
             {/* Strategy Parameters */}
             <div style={{ ...sectionStyle, marginTop: '16px', paddingTop: '16px', borderTop: `1px solid ${THEME.border.primary}` }}>
                 <h3 style={{ fontSize: '14px', fontWeight: 600, color: THEME.text.secondary, margin: 0 }}>Tham số chiến lược</h3>
-                
+
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
                     <div style={cardStyle}>
                         <div style={{ fontSize: '12px', color: THEME.text.tertiary }}>VWAP</div>
@@ -287,11 +288,11 @@ const Settings: React.FC = () => {
 
             {/* Error Message */}
             {error && (
-                <div style={{ 
-                    marginTop: '16px', 
-                    padding: '8px', 
-                    borderRadius: '4px', 
-                    backgroundColor: THEME.alpha.sellBg, 
+                <div style={{
+                    marginTop: '16px',
+                    padding: '8px',
+                    borderRadius: '4px',
+                    backgroundColor: THEME.alpha.sellBg,
                     color: THEME.status.sell,
                     fontSize: '12px'
                 }}>
@@ -308,7 +309,7 @@ const Settings: React.FC = () => {
                     <button
                         onClick={() => handleSimulateSignal('BUY')}
                         disabled={isSimulating}
-                        style={{ 
+                        style={{
                             ...buttonStyle(THEME.status.buy, '#fff'),
                             flex: 1,
                             opacity: isSimulating ? 0.5 : 1,
@@ -319,7 +320,7 @@ const Settings: React.FC = () => {
                     <button
                         onClick={() => handleSimulateSignal('SELL')}
                         disabled={isSimulating}
-                        style={{ 
+                        style={{
                             ...buttonStyle(THEME.status.sell, '#fff'),
                             flex: 1,
                             opacity: isSimulating ? 0.5 : 1,
@@ -334,16 +335,16 @@ const Settings: React.FC = () => {
             </div>
 
             {/* Actions */}
-            <div style={{ 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                marginTop: '16px', 
-                paddingTop: '16px', 
-                borderTop: `1px solid ${THEME.border.primary}` 
+            <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginTop: '16px',
+                paddingTop: '16px',
+                borderTop: `1px solid ${THEME.border.primary}`
             }}>
                 <button
                     onClick={handleReset}
-                    style={{ 
+                    style={{
                         ...buttonStyle(THEME.alpha.sellBg, THEME.status.sell),
                         border: `1px solid ${THEME.status.sell}`,
                     }}
@@ -353,7 +354,7 @@ const Settings: React.FC = () => {
                 <button
                     onClick={handleSave}
                     disabled={isSaving}
-                    style={{ 
+                    style={{
                         ...buttonStyle(THEME.accent.yellow, '#000'),
                         opacity: isSaving ? 0.5 : 1,
                     }}

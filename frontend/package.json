@@ -19,7 +19,8 @@
     "@web3icons/react": "^4.1.7",
     "lightweight-charts": "^5.0.9",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "zustand": "^5.0.9"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

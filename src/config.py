@@ -21,6 +21,51 @@ from dotenv import load_dotenv
 DEFAULT_MAX_BOOK_TICKER_AGE_SECONDS = 2.0
 DEFAULT_TRADING_MODE = "PAPER"
 
+# Multi-token configuration
+DEFAULT_SYMBOLS = [
+    "BTCUSDT",
+    "ETHUSDT", 
+    "SOLUSDT",
+    "BNBUSDT",
+    "TAOUSDT",
+    "FETUSDT",
+    "ONDOUSDT",
+]
+
+
+@dataclass
+class MultiTokenConfig:
+    """
+    Multi-token support configuration.
+    
+    Supports running multiple trading symbols in parallel.
+    Symbols can be configured via SYMBOLS env variable (comma-separated).
+    
+    Example:
+        SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT
+    """
+    symbols: list = None
+    
+    def __post_init__(self):
+        """Load symbols from environment or use defaults."""
+        if self.symbols is None:
+            env_symbols = os.getenv("SYMBOLS", "")
+            if env_symbols:
+                self.symbols = [s.strip().upper() for s in env_symbols.split(",") if s.strip()]
+            else:
+                self.symbols = DEFAULT_SYMBOLS.copy()
+        
+        # Validate all symbols end with USDT (Binance perpetuals)
+        valid_symbols = []
+        for symbol in self.symbols:
+            if symbol.endswith("USDT"):
+                valid_symbols.append(symbol)
+            else:
+                logging.warning(f"⚠️ Invalid symbol format: {symbol}. Must end with USDT.")
+        
+        self.symbols = valid_symbols
+        logging.info(f"📊 MultiToken: {len(self.symbols)} symbols configured: {', '.join(self.symbols)}")
+
 
 @dataclass
 class BookTickerConfig:

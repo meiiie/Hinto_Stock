@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useMarketData } from '../hooks/useMarketData';
+// SOTA: Use Zustand store for multi-symbol data
+import { useActiveData1m } from '../stores/marketStore';
 import { THEME, formatPrice } from '../styles/theme';
+import { apiUrl, ENDPOINTS } from '../config/api';
 
 // Position interface aligned with backend PaperPosition
 interface Position {
@@ -63,12 +65,13 @@ const Portfolio: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const { data: marketData } = useMarketData('btcusdt');
+    // SOTA: Use Zustand selector for active symbol's market data
+    const marketData = useActiveData1m();
     const currentPrice = marketData?.close || 0;
 
     const fetchPortfolio = useCallback(async () => {
         try {
-            const response = await fetch('http://127.0.0.1:8000/trades/portfolio');
+            const response = await fetch(apiUrl(ENDPOINTS.PORTFOLIO));
             if (!response.ok) throw new Error('Failed to fetch portfolio');
             const data = await response.json();
             setPortfolio(data);
@@ -100,7 +103,7 @@ const Portfolio: React.FC = () => {
 
     const handleClosePosition = async (positionId: string) => {
         try {
-            const response = await fetch(`http://127.0.0.1:8000/trades/close/${positionId}`, { method: 'POST' });
+            const response = await fetch(apiUrl(ENDPOINTS.CLOSE_POSITION(positionId)), { method: 'POST' });
             if (response.ok) fetchPortfolio();
         } catch (err) {
             console.error('Error closing position:', err);
@@ -114,7 +117,7 @@ const Portfolio: React.FC = () => {
         }
         try {
             for (const position of portfolio.open_positions) {
-                await fetch(`http://127.0.0.1:8000/trades/close/${position.id}`, { method: 'POST' });
+                await fetch(apiUrl(ENDPOINTS.CLOSE_POSITION(position.id)), { method: 'POST' });
             }
             fetchPortfolio();
         } catch (err) {

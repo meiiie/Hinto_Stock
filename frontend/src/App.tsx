@@ -1,6 +1,16 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import './App.css';
-import { useMarketData } from './hooks/useMarketData';
+// SOTA: Zustand store for multi-symbol data + shared WebSocket
+import {
+  useActiveData1m,
+  useActiveData15m,
+  useActiveData1h,
+  useActiveSignal,
+  useActiveStateChange,
+  useConnectionState,
+  useActiveSymbol
+} from './stores/marketStore';
+import { useWebSocket } from './hooks/useWebSocket';
 import CandleChart from './components/CandleChart';
 import Portfolio from './components/Portfolio';
 import TradeHistory from './components/TradeHistory';
@@ -12,6 +22,7 @@ import SignalCard, { TradingSignal } from './components/SignalCard';
 import ErrorBoundary from './components/ErrorBoundary';
 import StateIndicator, { TradingState } from './components/StateIndicator';
 import TokenIcon from './components/TokenIcon';
+import TokenSelector from './components/TokenSelector';
 import { THEME } from './styles/theme';
 import { apiUrl, ENDPOINTS } from './config/api';
 
@@ -60,8 +71,28 @@ function App() {
   // Phase D: Lifted timeframe state for price synchronization
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('15m');
 
-  // Destructure data15m, data1h for multi-timeframe price sync
-  const { data: marketData, data15m, data1h, signal: wsSignal, stateChange, isConnected, reconnectState, reconnectNow } = useMarketData('btcusdt');
+  // SOTA: Use Zustand store for multi-symbol data
+  const selectedSymbol = useActiveSymbol();
+  const marketData = useActiveData1m();
+  const data15m = useActiveData15m();
+  const data1h = useActiveData1h();
+  const wsSignal = useActiveSignal();
+  const stateChange = useActiveStateChange();
+  const connection = useConnectionState();
+  const { reconnectNow } = useWebSocket();
+
+  // Derive connection state for backward compatibility
+  const isConnected = connection.isConnected;
+  const reconnectState = {
+    isReconnecting: connection.isReconnecting,
+    retryCount: connection.retryCount,
+    nextRetryIn: connection.nextRetryIn,
+  };
+
+  // SOTA: Log symbol changes for debugging
+  useEffect(() => {
+    console.log(`📊 Active symbol: ${selectedSymbol}`);
+  }, [selectedSymbol]);
 
   // Compute current price data based on selected timeframe
   // Fallback to 1m data if timeframe-specific data not available
@@ -382,6 +413,8 @@ function App() {
               color: C.text2,
             }}>Pro</span>
           </div>
+          {/* Multi-Token Selector */}
+          <TokenSelector />
           <nav style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             {tabs.map((tab) => (
               <button
@@ -461,10 +494,10 @@ function App() {
               backgroundColor: C.card,
               borderBottom: `1px solid ${C.border}`,
             }}>
-              {/* Token with icon */}
+              {/* Token with icon - SOTA: Dynamic based on activeSymbol */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <TokenIcon symbol="BTC" size={24} />
-                <span style={{ fontWeight: 700, color: C.text1 }}>BTC/USDT</span>
+                <TokenIcon symbol={selectedSymbol.replace('usdt', '').toUpperCase()} size={24} />
+                <span style={{ fontWeight: 700, color: C.text1 }}>{selectedSymbol.replace('usdt', '/USDT').toUpperCase()}</span>
                 <span style={{
                   fontSize: '10px',
                   padding: '2px 6px',

@@ -48,11 +48,21 @@ def get_paper_trading_service() -> PaperTradingService:
     return PaperTradingService(repository=repo)
 
 
+def get_realtime_service_for_symbol(symbol: str = 'btcusdt') -> RealtimeService:
+    """
+    Get RealtimeService for a specific symbol.
+    
+    SOTA Multi-Token: Returns service for the requested symbol.
+    """
+    container = get_container()
+    return container.get_realtime_service(symbol=symbol.lower())
+
+
 @lru_cache()
 def get_realtime_service() -> RealtimeService:
     """
-    Get singleton instance of RealtimeService via DI Container.
-    SOTA Phase 3: Uses DI container for full dependency injection.
+    Get default RealtimeService (BTCUSDT).
+    DEPRECATED: Use get_realtime_service_for_symbol for multi-token support.
     """
     container = get_container()
     return container.get_realtime_service(symbol='btcusdt')

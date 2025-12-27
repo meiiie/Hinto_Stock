@@ -99,7 +99,8 @@ class BinanceWebSocketClient:
         # Connection parameters (for reconnection)
         self._symbol: Optional[str] = None
         self._interval: Optional[str] = None
-        self._intervals: list[str] = []  # SOTA: Multi-stream support
+        self._intervals: list[str] = []  # SOTA: Multi-timeframe support
+        self._symbols: list[str] = []     # SOTA: Multi-symbol support
         
         # Logging
         self.logger = logging.getLogger(__name__)
@@ -108,22 +109,31 @@ class BinanceWebSocketClient:
         self, 
         symbol: str = "btcusdt", 
         interval: str = "1m",
-        intervals: Optional[list[str]] = None,  # SOTA: Multi-stream support
+        intervals: Optional[list[str]] = None,  # SOTA: Multi-timeframe support
+        symbols: Optional[list[str]] = None,     # SOTA: Multi-symbol support
         start_loop: bool = True
     ) -> None:
         """
         Connect to Binance WebSocket stream.
         
-        SOTA: Supports multi-timeframe via Combined Streams.
+        SOTA: Supports multi-symbol + multi-timeframe via Combined Streams.
         
         Args:
-            symbol: Trading pair symbol (e.g., 'btcusdt')
+            symbol: Trading pair symbol (legacy single symbol, e.g., 'btcusdt')
             interval: Kline interval for single stream (legacy, e.g., '1m')
             intervals: List of intervals for combined streams (e.g., ['1m', '15m', '1h'])
+            symbols: List of symbols for multi-symbol combined streams (e.g., ['btcusdt', 'ethusdt'])
             start_loop: Whether to start the receive loop task (default: True)
         
         Raises:
             Exception: If connection fails
+            
+        Example:
+            # Multi-symbol + multi-timeframe (SOTA)
+            await client.connect(
+                symbols=['btcusdt', 'ethusdt', 'solusdt'],
+                intervals=['1m', '15m', '1h']
+            )
         """
         if self._state == ConnectionState.CONNECTED:
             self.logger.warning("Already connected to WebSocket")
@@ -138,20 +148,25 @@ class BinanceWebSocketClient:
         self._symbol = symbol
         self._interval = interval
         self._intervals = intervals or [interval]  # Default to single interval
+        self._symbols = symbols or [symbol]         # SOTA: Default to single symbol
         
-        # SOTA: Build WebSocket URL for combined streams
-        if len(self._intervals) > 1:
+        # SOTA: Build WebSocket URL for combined streams (multi-symbol + multi-timeframe)
+        streams = []
+        for sym in self._symbols:
+            for intv in self._intervals:
+                streams.append(f"{sym.lower()}@kline_{intv}")
+        
+        if len(streams) > 1:
             # Combined Stream URL: wss://stream.binance.com:9443/stream?streams=<s1>/<s2>/<s3>
-            streams = [f"{symbol.lower()}@kline_{i}" for i in self._intervals]
             stream_query = "/".join(streams)
             url = f"wss://stream.binance.com:9443/stream?streams={stream_query}"
-            self.logger.info(f"🚀 SOTA: Multi-stream connection: {self._intervals}")
+            self.logger.info(f"🚀 SOTA: Multi-stream connection: {len(self._symbols)} symbols × {len(self._intervals)} timeframes = {len(streams)} streams")
         else:
             # Single stream (legacy)
-            stream_name = f"{symbol.lower()}@kline_{interval}"
+            stream_name = streams[0]
             url = f"{self.base_url}/{stream_name}"
         
-        self.logger.info(f"Connecting to Binance WebSocket: {url}")
+        self.logger.info(f"Connecting to Binance WebSocket: {url[:100]}...")
         
         try:
             self._websocket = await websockets.connect(
@@ -164,7 +179,7 @@ class BinanceWebSocketClient:
             self._last_update = datetime.now()
             self._error_message = None
             
-            self.logger.info("✅ WebSocket connected successfully")
+            self.logger.info(f"✅ WebSocket connected successfully ({len(streams)} streams)")
             
             # Notify connection callbacks
             await self._notify_connection_status()
@@ -270,9 +285,18 @@ class BinanceWebSocketClient:
         
         try:
             # Attempt to reconnect using stored parameters
-            if self._symbol and (self._interval or self._intervals):
-                # CRITICAL FIX: Do not start new loop, as we are already inside one
-                # SOTA: Reconnect with same intervals
+            if self._symbols and self._intervals:
+                # SOTA: Reconnect with same symbols and intervals
+                await self.connect(
+                    symbols=self._symbols,
+                    intervals=self._intervals,
+                    start_loop=False
+                )
+                
+                # Reset delay on successful connection
+                self._current_reconnect_delay = self.initial_reconnect_delay
+            elif self._symbol and (self._interval or self._intervals):
+                # Legacy single-symbol reconnect
                 await self.connect(
                     self._symbol, 
                     self._interval, 
@@ -305,16 +329,19 @@ class BinanceWebSocketClient:
         try:
             raw_data = json.loads(message)
             
-            # SOTA: Handle combined stream wrapper
+            # SOTA: Handle combined stream wrapper for multi-symbol + multi-timeframe
             if "stream" in raw_data and "data" in raw_data:
                 # Combined stream format
                 stream_name = raw_data["stream"]  # e.g., "btcusdt@kline_15m"
                 data = raw_data["data"]
-                # Extract interval from stream name: "btcusdt@kline_15m" -> "15m"
-                interval = stream_name.split("@kline_")[1] if "@kline_" in stream_name else "1m"
+                # Extract symbol and interval from stream name: "btcusdt@kline_15m"
+                parts = stream_name.split("@kline_")
+                symbol = parts[0] if parts else self._symbol
+                interval = parts[1] if len(parts) > 1 else "1m"
             else:
                 # Single stream format (legacy)
                 data = raw_data
+                symbol = self._symbol or "unknown"
                 interval = self._interval or "1m"
             
             # Calculate latency
@@ -327,8 +354,9 @@ class BinanceWebSocketClient:
             candle = self._parser.parse_kline_message(data)
             metadata = self._parser.extract_metadata(data)
             
-            # SOTA: Add interval to metadata for multi-timeframe routing
+            # SOTA: Add symbol AND interval to metadata for multi-symbol/timeframe routing
             metadata['interval'] = interval
+            metadata['symbol'] = symbol
             
             # Notify raw message callbacks
             for callback in self._message_callbacks:

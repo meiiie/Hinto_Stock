@@ -47,43 +47,93 @@ class SQLiteMarketDataRepository(MarketDataRepository):
                 conn.close()
     
     def _init_database(self) -> None:
-        """Initialize database tables for all timeframes"""
+        """
+        Initialize database with default tables.
+        
+        SOTA Multi-Symbol: Creates btcusdt tables for backward compatibility.
+        Other symbol tables are created dynamically via _ensure_table_exists().
+        """
+        # Create default btcusdt tables for backward compatibility
+        default_symbols = ['btcusdt']
+        timeframes = ['1m', '15m', '1h']
+        
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
-            # SOTA FIX: Include 1m table for real-time candle persistence
-            for table in ['btc_1m', 'btc_15m', 'btc_1h']:
-                cursor.execute(f'''
-                    CREATE TABLE IF NOT EXISTS {table} (
-                        timestamp TEXT PRIMARY KEY,
-                        open REAL,
-                        high REAL,
-                        low REAL,
-                        close REAL,
-                        volume REAL,
-                        ema_7 REAL,
-                        rsi_6 REAL,
-                        volume_ma_20 REAL
-                    )
-                ''')
-                
-                # Add index for faster timestamp queries
-                cursor.execute(f'''
-                    CREATE INDEX IF NOT EXISTS idx_{table}_timestamp 
-                    ON {table}(timestamp)
-                ''')
+            for symbol in default_symbols:
+                for tf in timeframes:
+                    table = self._get_table_name(symbol, tf)
+                    self._create_table_if_not_exists(cursor, table)
             
             conn.commit()
-            self.logger.debug(f"Initialized database tables (btc_1m, btc_15m, btc_1h)")
+            self.logger.debug(f"Initialized database with default tables")
     
-    def _get_table_name(self, timeframe: str) -> str:
-        """Convert timeframe to table name"""
-        return f"btc_{timeframe}"
+    def _create_table_if_not_exists(self, cursor, table: str) -> None:
+        """Create OHLCV table if it doesn't exist."""
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS {table} (
+                timestamp TEXT PRIMARY KEY,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume REAL,
+                ema_7 REAL,
+                rsi_6 REAL,
+                volume_ma_20 REAL
+            )
+        ''')
+        cursor.execute(f'''
+            CREATE INDEX IF NOT EXISTS idx_{table}_timestamp 
+            ON {table}(timestamp)
+        ''')
     
-    def save_candle(self, candle: Candle, indicator: Indicator, timeframe: str) -> None:
-        """Save candle with indicators"""
+    def _ensure_table_exists(self, symbol: str, timeframe: str) -> str:
+        """
+        Ensure table exists for symbol/timeframe, create if needed.
+        
+        SOTA Multi-Symbol: Dynamic table creation per symbol.
+        
+        Returns:
+            Table name
+        """
+        table = self._get_table_name(symbol, timeframe)
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Check if table exists
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table,)
+            )
+            if not cursor.fetchone():
+                self._create_table_if_not_exists(cursor, table)
+                conn.commit()
+                self.logger.info(f"📊 Created new table: {table}")
+        
+        return table
+    
+    def _get_table_name(self, symbol: str, timeframe: str) -> str:
+        """
+        Get table name for symbol and timeframe.
+        
+        SOTA Multi-Symbol: Per-symbol tables for data isolation.
+        Format: {symbol}_{timeframe} (e.g., ethusdt_15m)
+        """
+        return f"{symbol.lower()}_{timeframe}"
+    
+    def save_candle(self, candle: Candle, indicator: Indicator, timeframe: str, symbol: str = 'btcusdt') -> None:
+        """
+        Save candle with indicators.
+        
+        Args:
+            candle: Candle entity
+            indicator: Indicator entity
+            timeframe: '1m', '15m', or '1h'
+            symbol: Trading symbol (default: btcusdt for backward compat)
+        """
         try:
-            table = self._get_table_name(timeframe)
+            table = self._ensure_table_exists(symbol, timeframe)
             
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -106,23 +156,23 @@ class SQLiteMarketDataRepository(MarketDataRepository):
         except Exception as e:
             raise RepositoryError(f"Failed to save candle: {e}", e)
     
-    def save_market_data(self, market_data: MarketData) -> None:
+    def save_market_data(self, market_data: MarketData, symbol: str = 'btcusdt') -> None:
         """Save MarketData object (candle with indicators)"""
-        self.save_candle(market_data.candle, market_data.indicator, market_data.timeframe)
+        self.save_candle(market_data.candle, market_data.indicator, market_data.timeframe, symbol)
 
-    def save_candle_simple(self, candle: Candle, timeframe: str) -> None:
+    def save_candle_simple(self, candle: Candle, timeframe: str, symbol: str = 'btcusdt') -> None:
         """
         Save candle OHLCV only (without indicators).
         
-        SOTA FIX: Lightweight persistence for real-time candles.
-        Used by RealtimeService to persist closed candles.
+        SOTA Multi-Symbol: Supports per-symbol storage.
         
         Args:
             candle: Candle entity with OHLCV data
             timeframe: '1m', '15m', or '1h'
+            symbol: Trading symbol (e.g., 'btcusdt', 'ethusdt')
         """
         try:
-            table = self._get_table_name(timeframe)
+            table = self._ensure_table_exists(symbol, timeframe)
             
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -142,17 +192,37 @@ class SQLiteMarketDataRepository(MarketDataRepository):
                     None   # volume_ma_20
                 ))
                 conn.commit()
-                self.logger.debug(f"📦 Persisted {timeframe} candle: {candle.timestamp}")
+                self.logger.debug(f"📦 Persisted {symbol}/{timeframe} candle: {candle.timestamp}")
         except Exception as e:
             raise RepositoryError(f"Failed to save simple candle: {e}", e)
     
-    def get_latest_candles(self, timeframe: str, limit: int = 100) -> List[MarketData]:
-        """Get latest N candles"""
+    def get_latest_candles(self, symbol: str, timeframe: str, limit: int = 100) -> List[MarketData]:
+        """
+        Get latest N candles for a symbol.
+        
+        SOTA Multi-Symbol: Returns data from symbol-specific table.
+        
+        Args:
+            symbol: Trading symbol (e.g., 'btcusdt', 'ethusdt')
+            timeframe: '1m', '15m', or '1h'
+            limit: Max candles to return
+        """
         try:
-            table = self._get_table_name(timeframe)
+            table = self._get_table_name(symbol, timeframe)
             
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                
+                # Check if table exists first
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                    (table,)
+                )
+                if not cursor.fetchone():
+                    # Table doesn't exist - return empty (Binance fallback will be used)
+                    self.logger.debug(f"Table {table} not found, returning empty")
+                    return []
+                
                 cursor.execute(f'''
                     SELECT timestamp, open, high, low, close, volume,
                            ema_7, rsi_6, volume_ma_20

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createChart, ColorType, IChartApi, AreaSeries, LineStyle, Time } from 'lightweight-charts';
 import { THEME, formatPrice } from '../styles/theme';
+import { apiUrl, ENDPOINTS } from '../config/api';
 
 interface EquityPoint {
     time: string;
@@ -34,7 +35,7 @@ const PerformanceDashboard: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [equityData, setEquityData] = useState<EquityPoint[]>([]);
-    
+
     // Equity Chart refs
     const equityChartRef = useRef<HTMLDivElement>(null);
     const chartInstanceRef = useRef<IChartApi | null>(null);
@@ -45,7 +46,7 @@ const PerformanceDashboard: React.FC = () => {
     const fetchMetrics = useCallback(async () => {
         setIsLoading(true);
         try {
-            const response = await fetch(`http://127.0.0.1:8000/trades/performance?days=${periodDays[period]}`);
+            const response = await fetch(apiUrl(ENDPOINTS.PERFORMANCE(periodDays[period])));
             if (!response.ok) throw new Error('Failed to fetch metrics');
             const data = await response.json();
             setMetrics(data);
@@ -62,12 +63,12 @@ const PerformanceDashboard: React.FC = () => {
         try {
             // Use 'trade' resolution for better intraday visibility (15m strategy)
             const response = await fetch(
-                `http://127.0.0.1:8000/trades/equity-curve?days=${periodDays[period]}&resolution=trade`
+                apiUrl(ENDPOINTS.EQUITY_CURVE(periodDays[period], 'trade'))
             );
             if (response.ok) {
                 const data = await response.json();
                 setEquityData(data.equity_curve || []);
-                
+
                 // Log for data consistency verification
                 console.log(`Equity Curve: ${data.equity_curve?.length || 0} points, ` +
                     `Current: $${data.current_equity}, Resolution: ${data.resolution}`);
@@ -79,7 +80,7 @@ const PerformanceDashboard: React.FC = () => {
             const startEquity = 10000;
             let currentEquity = startEquity;
             const numTrades = Math.floor(Math.random() * 20) + 5;
-            
+
             for (let i = 0; i <= numTrades; i++) {
                 const date = new Date();
                 date.setHours(date.getHours() - (numTrades - i) * 4); // Every 4 hours
@@ -314,9 +315,9 @@ const PerformanceDashboard: React.FC = () => {
                                 ${formatPrice(equityData[0]?.equity || 10000)}
                             </span>
                             <span style={{ color: THEME.text.tertiary }}>→</span>
-                            <span style={{ 
-                                color: (equityData[equityData.length - 1]?.equity || 0) >= (equityData[0]?.equity || 0) 
-                                    ? THEME.status.buy 
+                            <span style={{
+                                color: (equityData[equityData.length - 1]?.equity || 0) >= (equityData[0]?.equity || 0)
+                                    ? THEME.status.buy
                                     : THEME.status.sell,
                                 fontWeight: 600
                             }}>
@@ -325,15 +326,15 @@ const PerformanceDashboard: React.FC = () => {
                         </div>
                     )}
                 </div>
-                <div 
-                    ref={equityChartRef} 
-                    style={{ 
-                        width: '100%', 
+                <div
+                    ref={equityChartRef}
+                    style={{
+                        width: '100%',
                         height: '150px',
                         borderRadius: '8px',
                         overflow: 'hidden',
                         backgroundColor: THEME.bg.vessel
-                    }} 
+                    }}
                 />
                 {equityData.length === 0 && (
                     <div className="flex items-center justify-center h-[150px] text-xs" style={{ color: THEME.text.tertiary }}>

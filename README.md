@@ -2,17 +2,18 @@
 
 **Professional Desktop Trading Application**
 
-**Version:** 2.0 | **Status:** 🚀 Production Ready  
+**Version:** 2.1 | **Status:** 🚀 Production Ready  
 **Strategy:** Trend Pullback (VWAP + Bollinger Bands + StochRSI)  
-**Market:** BTC/USDT Futures (Multi-Timeframe: 1m, 15m, 1h)
+**Market:** Multi-Token (BTC, ETH, SOL, BNB, TAO, FET, ONDO) × Multi-Timeframe (1m, 15m, 1h)
 
 ---
 
 ## ✨ Key Features (Dec 2025)
 
+- **🎯 SOTA Multi-Token Trading** - 7 crypto tokens with Combined Streams (1 WebSocket = 21 streams)
 - **🚀 SOTA Multi-Timeframe Streaming** - Real-time updates every 250ms for 1m, 15m, 1h
 - **📦 Hybrid Data Layer** - SQLite persistence + Binance fallback (zero data loss on restart)
-- **🎨 Binance-Style UI** - Professional dark theme with token icons
+- **🎨 Binance-Style UI** - Professional dark theme with token icons + TokenSelector
 - **📊 Advanced Charts** - TradingView Lightweight Charts with VWAP, BB, signals
 - **⚡ State Machine** - BOOTSTRAP → SCANNING → IN_POSITION → COOLDOWN
 - **📱 Desktop App** - Tauri-powered native desktop application
@@ -121,25 +122,45 @@ pytest tests/architecture/ -v
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### SOTA Multi-Timeframe Architecture
+### SOTA Multi-Token Architecture (Dec 2025)
+
+**Following Binance Official Best Practices:**
+
+| Feature | Implementation |
+|---------|---------------|
+| Combined Streams | 1 WebSocket for ALL symbols (7 × 3 = 21 streams) |
+| Max Streams | 1024 per connection (we use 21) |
+| Message Rate | < 5/second (compliant) |
+| Connection Lifetime | Auto-reconnect before 24h |
 
 ```
-Binance WebSocket (Combined Streams)
-  wss://stream.binance.com:9443/stream?streams=
-    btcusdt@kline_1m/btcusdt@kline_15m/btcusdt@kline_1h
-                          ↓
-              BinanceWebSocketClient
-              (parses stream → interval)
-                          ↓
-                  RealtimeService
-              (routes by interval)
-                    ↓   ↓   ↓
-                   1m  15m  1h
-                    ↓   ↓   ↓
-                    EventBus
-                    ↓   ↓   ↓
-                   Frontend
+┌─────────────────────────────────────────────────────────────────┐
+│                  SharedBinanceClient (Singleton)                 │
+│       wss://stream.binance.com/stream?streams=                  │
+│  btcusdt@kline_1m/ethusdt@kline_1m/solusdt@kline_1m/...        │
+│                     (1 WebSocket = 21 streams)                   │
+└─────────────────────────────────────────────────────────────────┘
+                               ↓ routes by symbol
+       ┌───────────────────────┼───────────────────────┐
+       ↓                       ↓                       ↓
+┌──────────────┐       ┌──────────────┐       ┌──────────────┐
+│ RealtimeService      │  RealtimeService     │  RealtimeService
+│   BTCUSDT    │       │    ETHUSDT   │       │    SOLUSDT   │
+└──────┬───────┘       └──────┬───────┘       └──────┬───────┘
+       ↓                       ↓                       ↓
+┌──────────────┐       ┌──────────────┐       ┌──────────────┐
+│ SignalGenerator      │  SignalGenerator     │  SignalGenerator
+└──────────────┘       └──────────────┘       └──────────────┘
 ```
+
+**Supported Tokens (configurable via env):**
+- BTC, ETH, SOL, BNB, TAO, FET, ONDO (default 7)
+- Scalable to 100+ tokens (1024 stream limit)
+
+**Key Files:**
+- `SharedBinanceClient` - `src/infrastructure/websocket/shared_binance_client.py`
+- `MultiTokenConfig` - `src/config.py`
+- `TokenSelector` - `frontend/src/components/TokenSelector.tsx`
 
 ### 📦 SOTA Hybrid Data Layer (Dec 2025)
 

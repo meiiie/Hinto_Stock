@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { THEME } from '../styles/theme';
+import { apiUrl, ENDPOINTS } from '../config/api';
 
 interface SystemStatus {
     status: string;
@@ -29,18 +30,18 @@ interface ConnectionStatusProps {
  * **Feature: desktop-trading-dashboard**
  * **Validates: Requirements 1.1 - WebSocket connection status**
  */
-const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ 
-    isConnected, 
-    error, 
+const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
+    isConnected,
+    error,
     reconnectState,
-    onReconnectNow 
+    onReconnectNow
 }) => {
     const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
 
     useEffect(() => {
         const fetchStatus = async () => {
             try {
-                const response = await fetch('http://127.0.0.1:8000/system/status');
+                const response = await fetch(apiUrl(ENDPOINTS.SYSTEM_STATUS));
                 if (response.ok) {
                     const data = await response.json();
                     setSystemStatus(data);
@@ -59,9 +60,9 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
 
     const getStatusConfig = () => {
         if (isConnected) {
-            return { 
-                color: THEME.status.buy, 
-                bg: THEME.alpha.buyBg, 
+            return {
+                color: THEME.status.buy,
+                bg: THEME.alpha.buyBg,
                 text: 'Live',
                 icon: '🟢',
                 showPulse: true
@@ -70,17 +71,17 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
         if (isReconnecting) {
             const countdown = reconnectState?.nextRetryIn || 0;
             const retryNum = (reconnectState?.retryCount || 0) + 1;
-            return { 
-                color: THEME.accent.yellow, 
-                bg: THEME.alpha.warningBg, 
+            return {
+                color: THEME.accent.yellow,
+                bg: THEME.alpha.warningBg,
                 text: `Reconnecting in ${countdown}s... (attempt ${retryNum})`,
                 icon: '🟡',
                 showPulse: true
             };
         }
-        return { 
-            color: THEME.status.sell, 
-            bg: THEME.alpha.sellBg, 
+        return {
+            color: THEME.status.sell,
+            bg: THEME.alpha.sellBg,
             text: 'Disconnected',
             icon: '🔴',
             showPulse: false
@@ -91,32 +92,32 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
     const showReconnectButton = !isConnected && onReconnectNow;
 
     return (
-        <div 
-            style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '12px', 
-                borderRadius: '8px', 
+        <div
+            style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                borderRadius: '8px',
                 padding: '8px 12px',
-                backgroundColor: THEME.bg.secondary 
+                backgroundColor: THEME.bg.secondary
             }}
         >
             {/* Status Indicator */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div 
-                    style={{ 
-                        width: '8px', 
-                        height: '8px', 
+                <div
+                    style={{
+                        width: '8px',
+                        height: '8px',
                         borderRadius: '50%',
                         backgroundColor: status.color,
                         animation: status.showPulse ? 'pulse 2s infinite' : 'none'
-                    }} 
+                    }}
                 />
-                <span 
-                    style={{ 
-                        fontSize: '12px', 
+                <span
+                    style={{
+                        fontSize: '12px',
                         fontWeight: 500,
-                        color: status.color 
+                        color: status.color
                     }}
                 >
                     {status.text}

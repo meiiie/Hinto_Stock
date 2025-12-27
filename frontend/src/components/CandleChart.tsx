@@ -13,13 +13,19 @@ import {
     IPriceLine,
     SeriesMarker
 } from 'lightweight-charts';
-import { useMarketData } from '../hooks/useMarketData';
+// SOTA: Use Zustand store for multi-symbol data
+import {
+    useActiveData1m,
+    useActiveData15m,
+    useActiveData1h,
+    useActiveSignal,
+    useActiveSymbol
+} from '../stores/marketStore';
 import { apiUrl, ENDPOINTS } from '../config/api';
 
 // Shared utilities - exported for use in other chart components
 // Note: Local definitions kept below for now to avoid breaking changes
 export { CHART_COLORS, type Timeframe, type ChartData as SharedChartData } from '../utils/chartConstants';
-export { toVietnamTime as sharedToVietnamTime, formatPrice as sharedFormatPrice } from '../utils/chartUtils';
 
 // Position interface for price lines
 interface OpenPosition {
@@ -179,7 +185,15 @@ const CandleChart: React.FC<CandleChartProps> = ({
     // Open positions state for price lines
     const [openPositions, setOpenPositions] = useState<OpenPosition[]>([]);
 
-    const { data: realtimeData, data15m: realtimeData15m, data1h: realtimeData1h, signal: realtimeSignal } = useMarketData('btcusdt');
+    // SOTA: Use Zustand selectors for multi-symbol data
+    const activeSymbol = useActiveSymbol();
+    const realtimeData = useActiveData1m();
+    const realtimeData15m = useActiveData15m();
+    const realtimeData1h = useActiveData1h();
+    const realtimeSignal = useActiveSignal();
+
+    // Track previous symbol for detecting changes
+    const prevSymbolRef = useRef<string>(activeSymbol);
 
     // Use prop timeframe if provided (controlled), otherwise internal state (uncontrolled)
     const [internalTimeframe, setInternalTimeframe] = useState<Timeframe>('15m');
@@ -511,7 +525,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);  // Chart init only once on mount - signals now handled separately
 
-    // Load History when Timeframe Changes
+    // SOTA: Load History when Timeframe or Symbol Changes
     useEffect(() => {
         const fetchHistory = async () => {
             setIsLoading(true);
@@ -521,9 +535,16 @@ const CandleChart: React.FC<CandleChartProps> = ({
             lastRenderedTimeRef.current[timeframe] = 0;
             setSignals([]);
 
+            // SOTA: Track symbol change
+            if (prevSymbolRef.current !== activeSymbol) {
+                console.log(`📊 Symbol changed: ${prevSymbolRef.current} → ${activeSymbol}`);
+                prevSymbolRef.current = activeSymbol;
+            }
+
             try {
                 // Fetch 400 candles for technical analysis (SOTA standard)
-                const response = await fetch(apiUrl(ENDPOINTS.WS_HISTORY('btcusdt', timeframe, 400)));
+                // SOTA: Use activeSymbol instead of hardcoded btcusdt
+                const response = await fetch(apiUrl(ENDPOINTS.WS_HISTORY(activeSymbol, timeframe, 400)));
                 if (!response.ok) throw new Error('Failed to fetch history');
 
                 const historyData: ChartData[] = await response.json();
@@ -583,7 +604,17 @@ const CandleChart: React.FC<CandleChartProps> = ({
                     if (bbUpperSeriesRef.current) bbUpperSeriesRef.current.setData(bbUpper);
                     if (bbLowerSeriesRef.current) bbLowerSeriesRef.current.setData(bbLower);
 
-                    if (chartRef.current) chartRef.current.timeScale().fitContent();
+                    if (chartRef.current) {
+                        chartRef.current.timeScale().fitContent();
+
+                        // SOTA FIX: Force Price Scale to auto-fit new data range
+                        // This resolves the issue where switching from BTC (80k) to BNB (600)
+                        // keeps the 80k scale, making BNB candles invisible.
+                        chartRef.current.priceScale('right').applyOptions({
+                            autoScale: true,
+                            scaleMargins: { top: 0.1, bottom: 0.2 }
+                        });
+                    }
 
                     const lastCandle = trimmedData[trimmedData.length - 1];
                     const prevCandle = trimmedData[trimmedData.length - 2];
@@ -605,7 +636,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
                     // SOTA FIX: Initialize lastRenderedTimeRef to prevent "Cannot update oldest data" error
                     const lastChartTime = toVietnamTime(lastCandle.time) as number;
                     lastRenderedTimeRef.current[timeframe] = lastChartTime;
-                    console.log(`📊 Chart initialized for ${timeframe}: lastRenderedTime=${lastChartTime}`);
+                    console.log(`📊 Chart initialized for ${activeSymbol}/${timeframe}: lastRenderedTime=${lastChartTime}`);
                 }
             } catch (err) {
                 console.error("Error loading chart history:", err);
@@ -615,7 +646,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
         };
 
         fetchHistory();
-    }, [timeframe]);
+    }, [timeframe, activeSymbol]);  // SOTA: Reload on symbol OR timeframe change
 
     // Handle new signals from WebSocket
     useEffect(() => {

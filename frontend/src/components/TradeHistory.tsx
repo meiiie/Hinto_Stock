@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { THEME, formatPrice, formatVietnamDate, calculateDuration } from '../styles/theme';
+import { apiUrl, ENDPOINTS } from '../config/api';
 
 interface Trade {
     id: string;
@@ -45,7 +46,7 @@ const TradeHistory: React.FC = () => {
     const fetchTrades = useCallback(async (page: number) => {
         setIsLoading(true);
         try {
-            const response = await fetch(`http://127.0.0.1:8000/trades/history?page=${page}&limit=${limit}`);
+            const response = await fetch(apiUrl(ENDPOINTS.TRADE_HISTORY(page, limit)));
             if (!response.ok) throw new Error('Failed to fetch trades');
             const data = await response.json();
             setTrades(data);

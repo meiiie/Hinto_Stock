@@ -1,8 +1,16 @@
 import React from 'react';
-import { useMarketData } from '../hooks/useMarketData';
+// SOTA: Use Zustand store for multi-symbol data
+import { useActiveData1m, useActiveSymbol, useConnectionState } from '../stores/marketStore';
 
 const PriceTicker: React.FC = () => {
-    const { data, isConnected } = useMarketData('btcusdt');
+    // SOTA: Use Zustand selectors for active symbol data
+    const data = useActiveData1m();
+    const activeSymbol = useActiveSymbol();
+    const connection = useConnectionState();
+    const isConnected = connection.isConnected;
+
+    // Format symbol for display (btcusdt -> BTC/USDT)
+    const displaySymbol = activeSymbol.replace('usdt', '/USDT').toUpperCase();
 
     const formatPrice = (price: number) => {
         return new Intl.NumberFormat('en-US', {
@@ -16,7 +24,7 @@ const PriceTicker: React.FC = () => {
             {/* Header */}
             <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-white">BTC/USDT</span>
+                    <span className="text-sm font-bold text-white">{displaySymbol}</span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium">
                         Perp
                     </span>
@@ -30,12 +38,11 @@ const PriceTicker: React.FC = () => {
                     <div className="text-2xl font-bold font-mono text-white tracking-tight">
                         ${formatPrice(data.close)}
                     </div>
-                    
+
                     {/* Change */}
                     {data.change_percent !== undefined && (
-                        <div className={`text-sm font-mono font-medium ${
-                            data.change_percent >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                        }`}>
+                        <div className={`text-sm font-mono font-medium ${data.change_percent >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            }`}>
                             {data.change_percent >= 0 ? '+' : ''}{data.change_percent.toFixed(2)}%
                         </div>
                     )}
@@ -44,10 +51,9 @@ const PriceTicker: React.FC = () => {
                     <div className="flex gap-3 mt-2 pt-2 border-t border-zinc-800">
                         <div>
                             <div className="text-[10px] text-zinc-500 uppercase">RSI</div>
-                            <div className={`text-xs font-mono font-medium ${
-                                (data.rsi || 0) > 70 ? 'text-rose-400' : 
+                            <div className={`text-xs font-mono font-medium ${(data.rsi || 0) > 70 ? 'text-rose-400' :
                                 (data.rsi || 0) < 30 ? 'text-emerald-400' : 'text-zinc-300'
-                            }`}>
+                                }`}>
                                 {data.rsi?.toFixed(1) || '-'}
                             </div>
                         </div>
@@ -58,17 +64,6 @@ const PriceTicker: React.FC = () => {
                             </div>
                         </div>
                     </div>
-
-                    {/* Signal */}
-                    {data.signal && data.signal.type !== 'hold' && (
-                        <div className={`mt-2 px-2 py-1 rounded text-xs font-bold text-center ${
-                            data.signal.type === 'buy' 
-                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
-                                : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                        }`}>
-                            {data.signal.type === 'buy' ? '🔼 BUY SIGNAL' : '🔽 SELL SIGNAL'}
-                        </div>
-                    )}
                 </>
             ) : (
                 <div className="text-zinc-500 text-sm animate-pulse">Connecting...</div>
