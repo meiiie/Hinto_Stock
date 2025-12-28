@@ -33,6 +33,11 @@ class SQLiteMarketDataRepository(MarketDataRepository):
         if db_path == ":memory:":
             self._memory_conn = sqlite3.connect(":memory:")
         self._init_database()
+        
+        # SOTA: Hinto In-Memory Price Cache (Hot Path)
+        # Stores the latest real-time price tick for each symbol.
+        # Used by PaperTradingService for sub-second PnL updates without DB latency.
+        self._price_cache: dict[str, float] = {}
     
     @contextmanager
     def _get_connection(self):
@@ -415,3 +420,24 @@ class SQLiteMarketDataRepository(MarketDataRepository):
                 }
         except Exception as e:
             raise RepositoryError(f"Failed to get table info: {e}", e)
+
+    def update_realtime_price(self, symbol: str, price: float) -> None:
+        """
+        Update the real-time price cache for a symbol.
+        
+        Args:
+            symbol: Trading pair symbol (e.g., 'BTCUSDT')
+            price: Current market price
+        """
+        if symbol and price > 0:
+            self._price_cache[symbol.lower()] = price
+
+    def get_realtime_price(self, symbol: str) -> float:
+        """
+        Get the latest real-time price from cache.
+        Returns 0.0 if not found.
+        
+        Args:
+            symbol: Trading pair symbol
+        """
+        return self._price_cache.get(symbol.lower(), 0.0)

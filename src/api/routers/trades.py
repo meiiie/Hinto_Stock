@@ -82,34 +82,44 @@ async def get_portfolio(
     
     **Validates: Requirements 4.1, 4.4**
     
-    Returns virtual balance, equity, unrealized PnL, open positions, and pending orders.
+    Returns virtual balance, equity, unrealized PnL, open positions (enriched), and pending orders.
     """
-    # SOTA FIX: Don't pass single price. Service uses 'Price Oracle' (Repository).
+    # SOTA FIX: Use enriched positions with current_price and pnl
     portfolio = paper_service.get_portfolio()
+    enriched_positions = paper_service.get_positions_with_pnl()
     
     # Get pending orders and add to response
     pending_orders = paper_service.repo.get_pending_orders()
     
-    # Build response with pending orders included
-    response = portfolio.to_dict()
-    response['pending_orders'] = [
-        {
-            "id": order.id,
-            "signal_id": order.id[:8],  # Short ID for display
-            "symbol": order.symbol,
-            "side": order.side,
-            "entry_price": order.entry_price,
-            "size": order.quantity,
-            "stop_loss": order.stop_loss,
-            "take_profits": [order.take_profit] if order.take_profit else [],
-            "created_at": order.open_time.isoformat() if order.open_time else None,
-            "expires_at": None,  # Would need TTL calculation
-            "ttl_seconds": max(0, 45*60 - int((datetime.now() - order.open_time).total_seconds())) if order.open_time else 0
-        }
-        for order in pending_orders
-    ]
+    # Build response with enriched positions and pending orders
+    response = {
+        'balance': portfolio.balance,
+        'equity': portfolio.equity,
+        'unrealized_pnl': portfolio.unrealized_pnl,
+        'realized_pnl': portfolio.realized_pnl,
+        'open_positions_count': len(enriched_positions),
+        'open_positions': enriched_positions,  # ENRICHED with current_price, pnl, roe
+        'pending_orders': [
+            {
+                "id": order.id,
+                "signal_id": order.id[:8],
+                "symbol": order.symbol,
+                "side": order.side,
+                "entry_price": order.entry_price,
+                "size": order.quantity,
+                "margin": order.margin,
+                "leverage": order.leverage,
+                "stop_loss": order.stop_loss,
+                "take_profits": [order.take_profit] if order.take_profit else [],
+                "created_at": order.open_time.isoformat() if order.open_time else None,
+                "expires_at": None,
+                "ttl_seconds": max(0, 45*60 - int((datetime.now() - order.open_time).total_seconds())) if order.open_time else 0
+            }
+            for order in pending_orders
+        ]
+    }
     
-    logger.info(f"📊 Portfolio: {len(response.get('open_positions', []))} positions, {len(pending_orders)} pending")
+    logger.info(f"📊 Portfolio: {len(enriched_positions)} positions, {len(pending_orders)} pending")
     
     return response
 

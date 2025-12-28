@@ -46,6 +46,7 @@ from ..application.services.hard_filters import HardFilters
 from ..application.services.state_recovery_service import StateRecoveryService
 from ..application.services.smart_entry_calculator import SmartEntryCalculator
 from ..application.signals.signal_generator import SignalGenerator
+from ..application.analysis.trend_filter import TrendFilter # SOTA: For HTF Confluence
 
 
 class DIContainer:
@@ -598,6 +599,12 @@ class DIContainer:
         
         return self._instances['signal_lifecycle_service']
     
+    def get_trend_filter(self) -> TrendFilter:
+        """Get TrendFilter instance (singleton)."""
+        if 'trend_filter' not in self._instances:
+            self._instances['trend_filter'] = TrendFilter(ema_period=50) # Standard 1H/4H period
+        return self._instances['trend_filter']
+
     def get_realtime_service(self, symbol: str = "btcusdt"):
         """
         Get RealtimeService instance with all dependencies (singleton per symbol).
@@ -634,6 +641,8 @@ class DIContainer:
                 paper_service=self.get_paper_trading_service(),
                 # SOTA FIX: Inject lifecycle_service for signal persistence!
                 lifecycle_service=self.get_signal_lifecycle_service(),
+                # SOTA FIX: Inject trend_filter for HTF Confluence (Phase 12)
+                trend_filter=self.get_trend_filter(),
             )
             self.logger.info(f"✅ Created RealtimeService for {symbol} with all services injected!")
         

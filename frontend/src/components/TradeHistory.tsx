@@ -211,11 +211,12 @@ const TradeHistory: React.FC = () => {
                                 <th style={thStyle('left', '100px')}>Thời gian</th>
                                 <th style={thStyle('left', '90px')}>Cặp</th>
                                 <th style={thStyle('center', '70px')}>Loại</th>
+                                <th style={thStyle('right', '80px')}>Margin</th>
                                 <th style={thStyle('right', '100px')}>Entry</th>
                                 <th style={thStyle('right', '100px')}>Exit</th>
-                                <th style={thStyle('right', '140px')}>P&L</th>
-                                <th style={thStyle('center', '80px')}>Thời lượng</th>
-                                <th style={thStyle('center', '100px')}>Lý do</th>
+                                <th style={thStyle('right', '120px')}>P&L</th>
+                                <th style={thStyle('center', '70px')}>Thời lượng</th>
+                                <th style={thStyle('center', '90px')}>Lý do</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -258,6 +259,11 @@ const TradeHistory: React.FC = () => {
                                             }}>
                                                 {trade.side === 'LONG' ? 'MUA' : 'BÁN'}
                                             </span>
+                                        </td>
+
+                                        {/* Margin - NEW COLUMN */}
+                                        <td style={{ ...tdStyle('right'), fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: THEME.text.secondary }}>
+                                            ${formatPrice(trade.margin)}
                                         </td>
 
                                         {/* Entry Price */}

@@ -231,6 +231,29 @@ class MarketDataRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    def update_realtime_price(self, symbol: str, price: float) -> None:
+        """
+        Update the real-time price cache for a symbol.
+        Hot-path method for sub-second updates.
+        
+        Args:
+            symbol: Trading pair symbol
+            price: Current market price
+        """
+        pass
+
+    @abstractmethod
+    def get_realtime_price(self, symbol: str) -> float:
+        """
+        Get the latest real-time price from cache.
+        Returns 0.0 if not found.
+        
+        Args:
+            symbol: Trading pair symbol
+        """
+        pass
+
 
 class RepositoryError(Exception):
     """

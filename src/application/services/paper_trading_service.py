@@ -99,10 +99,16 @@ class PaperTradingService:
             price_to_use = 0.0
             
             # 1. Try to get price from Repository (Priority 1)
+            # 1. Try to get price from Repository (Priority 1)
             if self.market_data_repo:
-                candles = self.market_data_repo.get_latest_candles(pos.symbol, '1m', 1)
-                if candles and len(candles) > 0:
-                    price_to_use = candles[0].close
+                # 1a. HOT PATH: In-Memory Cache
+                price_to_use = self.market_data_repo.get_realtime_price(pos.symbol)
+                
+                # 1b. COLD PATH: DB Fallback (if cache empty)
+                if price_to_use == 0.0:
+                    candles = self.market_data_repo.get_latest_candles(pos.symbol, '1m', 1)
+                    if candles and len(candles) > 0:
+                        price_to_use = candles[0].close
             
             # 2. Fallback to override if logic allows (Weak fallback)
             # Only if we couldn't get price from repo and override is provided
@@ -130,9 +136,14 @@ class PaperTradingService:
             
             # Get Price from Repo
             if self.market_data_repo:
-                candles = self.market_data_repo.get_latest_candles(pos.symbol, '1m', 1)
-                if candles and len(candles) > 0:
-                    current_price = candles[0].close
+                # 1. HOT PATH: In-Memory Cache (Realtime)
+                current_price = self.market_data_repo.get_realtime_price(pos.symbol)
+                
+                # 2. COLD PATH: DB Fallback
+                if current_price == 0.0:
+                    candles = self.market_data_repo.get_latest_candles(pos.symbol, '1m', 1)
+                    if candles and len(candles) > 0:
+                        current_price = candles[0].close
             
             # Fallback (Should not happen in prod if data exists)
             if current_price == 0.0:

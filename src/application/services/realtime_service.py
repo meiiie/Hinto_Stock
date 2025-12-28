@@ -38,6 +38,7 @@ from ..signals import SignalGenerator, TradingSignal
 from .entry_price_calculator import EntryPriceCalculator
 from .tp_calculator import TPCalculator
 from .stop_loss_calculator import StopLossCalculator
+from ..analysis.trend_filter import TrendFilter, TrendDirection # SOTA: For HTF Confluence
 from .confidence_calculator import ConfidenceCalculator
 from .smart_entry_calculator import SmartEntryCalculator
 from .paper_trading_service import PaperTradingService
@@ -79,7 +80,9 @@ class RealtimeService:
         # SOTA FIX: Market data repository for candle persistence (Phase 2)
         market_data_repository: Optional[MarketDataRepository] = None,
         # SOTA FIX: Signal lifecycle service for persistence
-        lifecycle_service = None,  # SignalLifecycleService (avoid circular import)
+        lifecycle_service: Optional['SignalLifecycleService'] = None,  # SignalLifecycleService (avoid circular import)
+        # SOTA FIX: TrendFilter for HTF Confluence
+        trend_filter: Optional[TrendFilter] = None
     ):
         """
         Initialize real-time service with dependency injection.
@@ -140,6 +143,9 @@ class RealtimeService:
         
         # SOTA FIX: Signal lifecycle service for persistence
         self._lifecycle_service = lifecycle_service
+
+        # SOTA FIX: TrendFilter for HTF Confluence
+        self.trend_filter = trend_filter
         
         # Data storage (in-memory cache)
         self._latest_1m: Optional[Candle] = None
@@ -205,15 +211,27 @@ class RealtimeService:
             self.aggregator.on_15m_complete(self._on_15m_complete)
             self.aggregator.on_1h_complete(self._on_1h_complete)
             
-            # SOTA: Skip WebSocket connection if using SharedBinanceClient
+            # SOTA: Multi-Symbol Subscription (Active + Portfolio Watchlist)
+            watchlist_symbols = {self.symbol.lower()}
+            
+            # Add portfolio positions to watchlist
+            if self.paper_service:
+                try:
+                    positions = self.paper_service.get_positions()
+                    for pos in positions:
+                        watchlist_symbols.add(pos.symbol.lower())
+                    self.logger.info(f"📋 Portfolio Watchlist: {watchlist_symbols}")
+                except Exception as e:
+                    self.logger.error(f"Failed to fetch portfolio symbols: {e}")
+
             if shared_client_mode:
                 self.logger.info("📡 Using SharedBinanceClient for data streaming")
             else:
-                # Legacy: Connect own WebSocket
-                self.websocket_client.subscribe_candle(self._on_candle_received)
+                # Legacy: Connect own WebSocket with ALL symbols
+                # Subscribe to all unique symbols in watchlist
+                # Intervals: 1m (Base), 15m (Signal), 1h (HTF)
                 await self.websocket_client.connect(
-                    symbol=self.symbol,
-                    interval=self.interval,
+                    symbols=list(watchlist_symbols),
                     intervals=['1m', '15m', '1h']
                 )
             
@@ -513,8 +531,26 @@ class RealtimeService:
         interval = metadata.get('interval', '1m')
         is_closed = metadata.get('is_closed', False)
         
-        self.logger.info(f"🕯️ [{interval}] Candle: {candle.close:.2f} closed={is_closed}")
+        # Use metadata for symbol info instead of accessing candle.symbol
+        candle_symbol = metadata.get('symbol', self.symbol)
+        self.logger.info(f"🕯️ [{interval}] Candle: {candle.close:.2f} closed={is_closed} symbol={candle_symbol}")
         
+        # SOTA: Check if this is the ACTIVE symbol
+        is_active_symbol = (candle_symbol.lower() == self.symbol.lower())
+        
+        # SOTA: Always persist ALL incoming data (for Portfolio PnL)
+        # This acts as the "Background Price Oracle" feeder
+        if self._market_data_repository:
+             try:
+                 # 1. Update In-Memory Hot Cache (Fastest, for live PnL)
+                 self._market_data_repository.update_realtime_price(candle_symbol, candle.close)
+                 
+                 # 2. Persist to DB if closed (Slower, for history)
+                 if is_closed:
+                    self._market_data_repository.save_candle_simple(candle, interval, candle_symbol.lower())
+             except Exception as e:
+                 pass # Ignore persistence errors to keep stream alive
+
         # SOTA Multi-Stream Routing
         if interval == '15m':
             self._handle_15m_candle(candle, is_closed)
@@ -522,9 +558,32 @@ class RealtimeService:
         elif interval == '1h':
             self._handle_1h_candle(candle, is_closed)
             return
+            
+        # --- 1m Processing (Base Timeframe) ---
         
-        # Default: 1m candle processing (original logic)
+        # CRITICAL SOTA FILTER: Only process signals/chart updates for the ACTIVE symbol.
+        # Passive portfolio symbols are handled above (persistence only) and then ignored here.
+        if not is_active_symbol:
+             # SOTA FIX: Broadcast "Ticker" update for portfolio symbols
+             # This allows the Frontend Portfolio to update PnL in realtime
+             if self._event_bus:
+                 asyncio.create_task(self.connection_manager.broadcast_json({
+                     "type": "candle", # Frontend treats this as candle update -> updates store
+                     "symbol": candle_symbol, # e.g. 'SOLUSDT'
+                     "data": {
+                         "open": candle.open,
+                         "high": candle.high,
+                         "low": candle.low,
+                         "close": candle.close, # Used for PnL
+                         "time": int(candle.timestamp.timestamp()) if hasattr(candle.timestamp, 'timestamp') else 0,
+                         # No indicators for passive symbols to save bandwidth/CPU
+                     }
+                 }, self.symbol)) # Broadcast to ACTIVE channel (e.g. BTC)
+             return
+
+        # Default: 1m candle processing for ACTIVE symbol
         # Check if this is a NEW candle (different timestamp from current latest)
+        
         if self._latest_1m and candle.timestamp != self._latest_1m.timestamp:
             # New candle started - the previous one is now complete
             self.logger.debug(f"New candle detected: {candle.timestamp} - Saving previous candle")
@@ -537,7 +596,7 @@ class RealtimeService:
             # Generate signals
             self._generate_signals()
         
-        # Always update latest 1m candle (for real-time display)
+        # Always update latest 1m candle (for real-time display of ACTIVE symbol)
         self._latest_1m = candle
         
         # SOTA FIX: Broadcast candle update via EventBus to frontend WebSocket
@@ -768,9 +827,16 @@ class RealtimeService:
     def _generate_signals_15m(self) -> None:
         """Generate signals on 15m timeframe."""
         try:
+            # SOTA: HTF Confluence (Check 1H Trend)
+            htf_trend = None
+            if self.trend_filter and len(self._candles_1h) >= 50: # Need 50 for EMA50
+                htf_trend = self.trend_filter.get_trend_direction(list(self._candles_1h))
+                self.logger.debug(f"HTF Trend (1h): {htf_trend.value}")
+
             signal = self.signal_generator.generate_signal(
                 list(self._candles_15m),
-                symbol=self.symbol
+                symbol=self.symbol,
+                htf_trend=htf_trend
             )
             
             if signal and signal.signal_type.value != 'neutral':

@@ -98,8 +98,13 @@ const VN_TIMEZONE_OFFSET = 7 * 60 * 60; // 7 hours in seconds
 /**
  * Convert UTC timestamp to Vietnam time for display
  */
-const toVietnamTime = (utcTimestamp: number): Time => {
-    return (utcTimestamp + VN_TIMEZONE_OFFSET) as Time;
+/**
+ * Convert UTC timestamp to Vietnam time for display
+ * SOTA FIX: Strictly parse input to prevent string concatenation or object passing
+ */
+const toVietnamTime = (utcTimestamp: unknown): Time => {
+    const ts = safeParseTimestamp(utcTimestamp);
+    return (ts + VN_TIMEZONE_OFFSET) as Time;
 };
 
 /**

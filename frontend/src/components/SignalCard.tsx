@@ -26,6 +26,7 @@ export interface TradingSignal {
   confidence: number; // 0-100
   rrRatio: number;
   strategy: string;
+  reasons?: string[]; // SOTA: Display detailed logic (including HTF)
   indicators: {
     vwap?: number;
     rsi?: number;
@@ -280,6 +281,34 @@ export default function SignalCard({ signal, currentPrice, onExecute, onDismiss 
               {signal.indicators.stochK && (
                 <span>Stoch: <span style={{ color: C.text1 }}>{signal.indicators.stochK.toFixed(0)}/{signal.indicators.stochD?.toFixed(0)}</span></span>
               )}
+            </div>
+          )}
+
+          {/* Reasons List (SOTA Display) */}
+          {signal.reasons && signal.reasons.length > 0 && (
+            <div style={{
+              marginBottom: '16px',
+              padding: '10px',
+              backgroundColor: C.bg,
+              borderRadius: '6px',
+              borderLeft: `2px solid ${signalColor}`
+            }}>
+              <div style={{ fontSize: '10px', color: C.text3, marginBottom: '6px', textTransform: 'uppercase', fontWeight: 700 }}>
+                Signal Confluence
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {signal.reasons.map((reason, idx) => (
+                  <div key={idx} style={{
+                    fontSize: '11px',
+                    color: reason.includes('✓') ? C.up : reason.includes('✗') || reason.includes('🚫') ? C.down : C.text2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    {reason}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

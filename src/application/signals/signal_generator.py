@@ -39,6 +39,7 @@ from ..services.stop_loss_calculator import StopLossCalculator
 from ..services.confidence_calculator import ConfidenceCalculator
 from ..services.smart_entry_calculator import SmartEntryCalculator
 from .confluence_scorer import ConfluenceScorer, ConditionType, create_confluence_scorer_from_config
+from ..analysis.trend_filter import TrendDirection
 
 
 class SignalGenerator:
@@ -149,7 +150,7 @@ class SignalGenerator:
 
 
     
-    def generate_signal(self, candles: List[Candle], symbol: str) -> Optional[TradingSignal]:
+    def generate_signal(self, candles: List[Candle], symbol: str, htf_trend: Optional[TrendDirection] = None) -> Optional[TradingSignal]:
         """
         Generate trading signal based on current market conditions.
         
@@ -165,6 +166,7 @@ class SignalGenerator:
         Args:
             candles: List of Candle entities (chronological order)
             symbol: Symbol string for the signal (SOTA Requirement)
+            htf_trend: Optional Higher Timeframe Trend Direction (SOTA Confluence)
         
         Returns:
             TradingSignal or None if insufficient data or filters reject
@@ -311,7 +313,7 @@ class SignalGenerator:
             
             # Generate buy signal
             buy_signal = self._check_buy_conditions(
-                candles, current_price, vwap_result, bb_result, stoch_result, volume_spike_result, indicators, symbol
+                candles, current_price, vwap_result, bb_result, stoch_result, volume_spike_result, indicators, symbol, htf_trend
             )
             
             if buy_signal:
@@ -325,7 +327,7 @@ class SignalGenerator:
             
             # Generate sell signal
             sell_signal = self._check_sell_conditions(
-                candles, current_price, vwap_result, bb_result, stoch_result, volume_spike_result, indicators, symbol
+                candles, current_price, vwap_result, bb_result, stoch_result, volume_spike_result, indicators, symbol, htf_trend
             )
             
             if sell_signal:
@@ -514,7 +516,8 @@ class SignalGenerator:
         stoch_result: Optional[Any],
         volume_spike_result: Optional[Any],  # VolumeSpikeResult
         indicators: Dict[str, Any] = None,
-        symbol: str = "UNKNOWN"
+        symbol: str = "UNKNOWN",
+        htf_trend: Optional[TrendDirection] = None
     ) -> Optional[TradingSignal]:
         """
         Check for BUY signal using Trend Pullback Strategy.
@@ -536,8 +539,22 @@ class SignalGenerator:
         # === EVALUATE CONDITIONS ===
         # 1. Trend Filter: Price > VWAP
         trend_aligned = current_price > vwap_result.vwap
-        if trend_aligned:
+        
+        # SOTA: Check HTF Trend Confluence
+        htf_aligned = True
+        if htf_trend:
+            if htf_trend == TrendDirection.BEARISH:
+                htf_aligned = False
+                reasons.append(f"✗ HTF: Bearish (Counter-trend)")
+            else:
+                reasons.append(f"✓ HTF: {htf_trend.value.title()} (Aligned)")
+        
+        if trend_aligned and htf_aligned:
             reasons.append("✓ Trend: Price > VWAP (Bullish)")
+        elif not htf_aligned and htf_trend:
+             # STRICT RULE: HTF Misalignment blocks trade
+             self.logger.info(f"🚫 Signal blocked: HTF Misalignment ({htf_trend.value})")
+             return None
         elif self.strict_mode:
             return None  # Strict mode requires trend alignment
         else:
@@ -586,7 +603,7 @@ class SignalGenerator:
         if self.use_weighted_confluence and self.confluence_scorer:
             # SOTA: Weighted confluence scoring
             conditions = {
-                ConditionType.TREND_ALIGNMENT: trend_aligned,
+                ConditionType.TREND_ALIGNMENT: trend_aligned and htf_aligned, # Strict AND
                 ConditionType.PULLBACK_ZONE: pullback_zone,
                 ConditionType.MOMENTUM_TRIGGER: momentum_trigger,
                 ConditionType.CANDLE_CONFIRMATION: is_green,
@@ -618,8 +635,15 @@ class SignalGenerator:
             # Legacy: Count-based conditions
             conditions_met = sum([
                 trend_aligned, pullback_zone, momentum_trigger, 
-                is_green, volume_confirmed
+                is_green, volume_confirmed, htf_aligned
             ])
+            
+            # Adjust min conditions if HTF check is active (require it)
+            min_conditions = 4 if self.strict_mode else 3
+            if htf_trend:
+                 # If HTF context provided, treat it as a required filter effectively
+                 # by ensuring we have enough points.
+                 pass
             
             min_conditions = 4 if self.strict_mode else 3
             
@@ -646,7 +670,8 @@ class SignalGenerator:
         stoch_result: Optional[Any],
         volume_spike_result: Optional[Any],  # VolumeSpikeResult
         indicators: Dict[str, Any] = None,
-        symbol: str = "UNKNOWN"
+        symbol: str = "UNKNOWN",
+        htf_trend: Optional[TrendDirection] = None
     ) -> Optional[TradingSignal]:
         """
         Check for SELL signal using Trend Pullback Strategy.
@@ -665,9 +690,25 @@ class SignalGenerator:
         conditions_met = 0
         
         # 1. Trend Filter: Price < VWAP
-        if current_price < vwap_result.vwap:
+        # 1. Trend Filter: Price < VWAP
+        # SOTA: Check HTF Trend Confluence
+        htf_aligned = True
+        if htf_trend:
+            if htf_trend == TrendDirection.BULLISH:
+                htf_aligned = False
+                reasons.append(f"✗ HTF: Bullish (Counter-trend)")
+            else:
+                reasons.append(f"✓ HTF: {htf_trend.value.title()} (Aligned)")
+                
+                reasons.append(f"✓ HTF: {htf_trend.value.title()} (Aligned)")
+                
+        if current_price < vwap_result.vwap and htf_aligned:
             conditions_met += 1
             reasons.append("Trend: Price < VWAP (Bearish)")
+        elif not htf_aligned and htf_trend:
+             # STRICT RULE: HTF Misalignment blocks trade
+             self.logger.info(f"🚫 Signal blocked: HTF Misalignment ({htf_trend.value})")
+             return None
         elif self.strict_mode:
             return None  # Strict mode requires trend alignment
             

@@ -266,10 +266,15 @@ THEME.status.buy  // #0ECB81
 
 ## 📊 Trading Strategy
 
-### Trend Pullback Strategy
-1. **Trend Detection:** ADX > 25, VWAP trend alignment
-2. **Entry:** StochRSI oversold (< 20) + BB Lower touch
-3. **Exit:** StochRSI overbought (> 80) or TP/SL hit
+### Trend Pullback Strategy (v2.1)
+1.  **Trend Detection:**
+    *   **Layer 1 (HTF):** 1H Trend Direction (EMA50) - *Global Filter*
+    *   **Layer 2 (Intraday):** Price vs VWAP - *Local Trend*
+2.  **Entry:**
+    *   **Setup:** Pullback to BB Lower/VWAP
+    *   **Trigger:** StochRSI Cross Up (< 30)
+    *   **Confluence:** Must align with 1H Trend (e.g., Buy only if 1H is Bullish)
+3.  **Exit:** StochRSI overbought (> 80) or TP/SL hit
 
 ### Risk Management
 - Stop Loss: -1% from entry
