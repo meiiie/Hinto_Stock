@@ -13,6 +13,7 @@ import {
     IPriceLine,
     SeriesMarker
 } from 'lightweight-charts';
+import { BBFillPlugin } from './BBFillPlugin';
 // SOTA: Use Zustand store for multi-symbol data
 import {
     useActiveData1m,
@@ -39,7 +40,7 @@ interface OpenPosition {
 
 // Binance Color Scheme
 const BINANCE_COLORS = {
-    background: '#0B0E11',
+    background: '#181A20',  // Dark background like Binance
     cardBg: '#181A20',
     grid: '#333B47',
     textPrimary: '#EAECEF',
@@ -49,8 +50,9 @@ const BINANCE_COLORS = {
     sell: '#F6465D',
     buyBg: 'rgba(46, 189, 133, 0.1)',
     sellBg: 'rgba(246, 70, 93, 0.1)',
-    vwap: '#F0B90B',
-    bollinger: '#2962FF',
+    vwap: '#FB6C01',  // VWAP line color (orange)
+    bollinger: '#1F7DC8',  // BB line color
+    bollingerFill: 'rgba(31, 125, 200, 0.1)',  // BB fill between bands
     line: '#2B2F36',
 };
 
@@ -170,6 +172,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
     const vwapSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
     const bbUpperSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
     const bbLowerSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const bbFillPluginRef = useRef<BBFillPlugin | null>(null);  // Custom BB fill plugin
 
     // Dynamic Price Lines for Open Positions (using createPriceLine API)
     const entryPriceLineRef = useRef<IPriceLine | null>(null);
@@ -524,6 +527,17 @@ const CandleChart: React.FC<CandleChartProps> = ({
         });
         bbLowerSeriesRef.current = bbLowerSeries;
 
+        // Initialize BB Fill Plugin - custom plugin for fill between BB bands
+        if (candleSeriesRef.current) {
+            const bbFillPlugin = new BBFillPlugin({
+                fillColor: BINANCE_COLORS.bollingerFill,
+                upperSeries: bbUpperSeries,
+                lowerSeries: bbLowerSeries,
+            });
+            candleSeriesRef.current.attachPrimitive(bbFillPlugin);
+            bbFillPluginRef.current = bbFillPlugin;
+        }
+
         // Note: Price lines for Entry/SL/TP are now created dynamically
         // using candleSeries.createPriceLine() when positions are open
 
@@ -670,6 +684,10 @@ const CandleChart: React.FC<CandleChartProps> = ({
                     if (vwapSeriesRef.current) vwapSeriesRef.current.setData(vwap);
                     if (bbUpperSeriesRef.current) bbUpperSeriesRef.current.setData(bbUpper);
                     if (bbLowerSeriesRef.current) bbLowerSeriesRef.current.setData(bbLower);
+                    // Update BB fill plugin with new data
+                    if (bbFillPluginRef.current) {
+                        bbFillPluginRef.current.setDataFromArrays(bbUpper, bbLower);
+                    }
 
                     if (chartRef.current) {
                         chartRef.current.timeScale().fitContent();
