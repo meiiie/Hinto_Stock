@@ -178,8 +178,19 @@ class DataAggregator:
             close_price = last_candle.close
             total_volume = sum(c.volume for c in sorted_candles)
             
-            # Use first candle's timestamp as the aggregated candle timestamp
-            timestamp = first_candle.timestamp
+            # SOTA FIX: Align timestamp to timeframe boundary (15m or 1h)
+            # Instead of using first candle's raw timestamp, calculate the correct boundary
+            first_ts = first_candle.timestamp
+            if '15m' in timeframe:
+                # Align to 15-minute boundary: 00, 15, 30, 45
+                aligned_minute = (first_ts.minute // 15) * 15
+                timestamp = first_ts.replace(minute=aligned_minute, second=0, microsecond=0)
+            elif '1h' in timeframe:
+                # Align to hour boundary
+                timestamp = first_ts.replace(minute=0, second=0, microsecond=0)
+            else:
+                # Default to first candle's timestamp
+                timestamp = first_ts
             
             # Create aggregated candle
             aggregated = Candle(

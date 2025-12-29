@@ -99,11 +99,14 @@ app = FastAPI(
 )
 
 # Configure CORS
-# Allowing all origins for development convenience with Tauri
+# SOTA: Explicit origins required when allow_credentials=True
+# Per CORS spec, wildcard (*) is incompatible with credentials
 origins = [
-    "http://localhost:1420",  # Tauri dev
+    "http://localhost:1420",   # Tauri dev
     "http://127.0.0.1:1420",
-    "*" # Allow all for now to ensure smooth dev experience
+    "http://localhost:5173",   # Vite dev server
+    "http://127.0.0.1:5173",
+    "tauri://localhost",       # Tauri production
 ]
 
 app.add_middleware(
@@ -113,6 +116,42 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# SOTA FIX: Custom exception handler to ensure CORS headers on error responses
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Custom HTTP exception handler that maintains CORS headers."""
+    origin = request.headers.get("origin", "")
+    headers = {}
+    if origin in origins:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": str(exc.detail)},
+        headers=headers
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Catch-all exception handler that maintains CORS headers."""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    origin = request.headers.get("origin", "")
+    headers = {}
+    if origin in origins:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+        headers=headers
+    )
 
 # Include Routers
 app.include_router(system.router)

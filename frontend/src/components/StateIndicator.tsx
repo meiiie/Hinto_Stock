@@ -106,6 +106,8 @@ export default function StateIndicator({
             borderRadius: '8px',
             backgroundColor: config.bgColor,
             border: `1px solid ${config.color}40`,
+            minWidth: '140px', // SOTA: Prevent layout shift
+            whiteSpace: 'nowrap', // SOTA: Keep label on one line
         }}>
             {/* SVG Icon */}
             <Icon size={16} color={config.color} />

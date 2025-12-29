@@ -4,7 +4,7 @@ Message Parser - Infrastructure Layer
 Parses Binance WebSocket messages and converts them to domain entities.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import logging
 
@@ -60,9 +60,9 @@ class BinanceMessageParser:
             # Extract kline data
             kline = message.get('k', {})
             
-            # Parse timestamp (milliseconds to datetime)
+            # SOTA FIX: Use timezone-aware datetime for correct .timestamp() conversion
             timestamp_ms = kline.get('t')
-            timestamp = datetime.fromtimestamp(timestamp_ms / 1000)
+            timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
             
             # Parse OHLCV data
             open_price = float(kline.get('o', 0))
@@ -147,7 +147,7 @@ class BinanceMessageParser:
         
         return {
             'event_type': message.get('e'),
-            'event_time': datetime.fromtimestamp(message.get('E', 0) / 1000),
+            'event_time': datetime.fromtimestamp(message.get('E', 0) / 1000, tz=timezone.utc),
             'symbol': kline.get('s'),
             'interval': kline.get('i'),
             'is_closed': kline.get('x', False),

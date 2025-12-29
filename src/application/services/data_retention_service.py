@@ -115,25 +115,36 @@ class DataRetentionService:
                 await asyncio.sleep(300)  # 5 minutes
     
     async def _run_cleanup(self) -> None:
-        """Execute cleanup for all timeframes."""
+        """
+        Execute cleanup for all timeframes and all symbols.
+        
+        SOTA Multi-Symbol: Loops through all enabled symbols from config.
+        """
+        from src.config import MultiTokenConfig
+        
         self.logger.info("🧹 Starting retention cleanup...")
+        
+        # SOTA: Get all enabled symbols from config
+        config = MultiTokenConfig()
+        symbols = [s.lower() for s in config.symbols]
         
         total_deleted = 0
         
         for timeframe, days in self._retention.items():
-            try:
-                cutoff = datetime.now() - timedelta(days=days)
-                deleted = self._repository.delete_candles_before(timeframe, cutoff)
-                
-                if deleted > 0:
-                    self.logger.info(
-                        f"🧹 Cleaned {timeframe}: {deleted} candles "
-                        f"(older than {days} days)"
-                    )
-                    total_deleted += deleted
+            for symbol in symbols:
+                try:
+                    cutoff = datetime.now() - timedelta(days=days)
+                    deleted = self._repository.delete_candles_before(timeframe, cutoff, symbol)
                     
-            except Exception as e:
-                self.logger.error(f"Failed to cleanup {timeframe}: {e}")
+                    if deleted > 0:
+                        self.logger.info(
+                            f"🧹 Cleaned {symbol}/{timeframe}: {deleted} candles "
+                            f"(older than {days} days)"
+                        )
+                        total_deleted += deleted
+                        
+                except Exception as e:
+                    self.logger.error(f"Failed to cleanup {symbol}/{timeframe}: {e}")
         
         # Log database size after cleanup
         try:
@@ -149,17 +160,25 @@ class DataRetentionService:
         """
         Run cleanup synchronously (for testing or manual trigger).
         
+        SOTA Multi-Symbol: Cleans up all enabled symbols.
+        
         Returns:
             Total number of candles deleted
         """
+        from src.config import MultiTokenConfig
+        
+        config = MultiTokenConfig()
+        symbols = [s.lower() for s in config.symbols]
+        
         total_deleted = 0
         
         for timeframe, days in self._retention.items():
-            try:
-                cutoff = datetime.now() - timedelta(days=days)
-                deleted = self._repository.delete_candles_before(timeframe, cutoff)
-                total_deleted += deleted
-            except Exception as e:
-                self.logger.error(f"Failed to cleanup {timeframe}: {e}")
+            for symbol in symbols:
+                try:
+                    cutoff = datetime.now() - timedelta(days=days)
+                    deleted = self._repository.delete_candles_before(timeframe, cutoff, symbol)
+                    total_deleted += deleted
+                except Exception as e:
+                    self.logger.error(f"Failed to cleanup {symbol}/{timeframe}: {e}")
         
         return total_deleted

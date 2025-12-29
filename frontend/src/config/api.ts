@@ -48,10 +48,42 @@ export const ENDPOINTS = {
 
     // Trading
     PORTFOLIO: '/trades/portfolio',
-    TRADE_HISTORY: (page: number = 1, limit: number = 20) =>
-        `/trades/history?page=${page}&limit=${limit}`,
+    // SOTA Phase 24c: Server-side filtering support
+    TRADE_HISTORY: (
+        page: number = 1,
+        limit: number = 20,
+        symbol?: string,
+        side?: string,
+        pnl_filter?: string
+    ) => {
+        const params = new URLSearchParams();
+        params.append('page', page.toString());
+        params.append('limit', limit.toString());
+        if (symbol) params.append('symbol', symbol);
+        if (side) params.append('side', side);
+        if (pnl_filter) params.append('pnl_filter', pnl_filter);
+        return `/trades/history?${params.toString()}`;
+    },
+    // SOTA Phase 24c: Bulk export endpoint
+    TRADE_EXPORT: (
+        symbol?: string,
+        side?: string,
+        pnl_filter?: string,
+        page_from: number = 1,
+        page_to?: number
+    ) => {
+        const params = new URLSearchParams();
+        params.append('page_from', page_from.toString());
+        if (page_to) params.append('page_to', page_to.toString());
+        if (symbol) params.append('symbol', symbol);
+        if (side) params.append('side', side);
+        if (pnl_filter) params.append('pnl_filter', pnl_filter);
+        return `/trades/export?${params.toString()}`;
+    },
     EXECUTE_TRADE: (positionId: string) => `/trades/execute/${positionId}`,
     CLOSE_POSITION: (positionId: string) => `/trades/close/${positionId}`,
+    CANCEL_PENDING_ORDER: (orderId: string) => `/trades/pending/${orderId}`,
+    CANCEL_ALL_PENDING: '/trades/pending',
     RESET_TRADES: '/trades/reset',
     SIMULATE_TRADE: '/trades/simulate',
 
@@ -60,9 +92,53 @@ export const ENDPOINTS = {
     EQUITY_CURVE: (days: number, resolution: string = 'trade') =>
         `/trades/equity-curve?days=${days}&resolution=${resolution}`,
 
+    // Signals (SOTA Phase 25: Filtered signal history with analytics)
+    SIGNAL_HISTORY: (
+        page: number = 1,
+        limit: number = 50,
+        days: number = 30,
+        symbol?: string,
+        signal_type?: string,
+        status?: string,
+        min_confidence?: number
+    ) => {
+        const params = new URLSearchParams();
+        params.append('page', page.toString());
+        params.append('limit', limit.toString());
+        params.append('days', days.toString());
+        if (symbol) params.append('symbol', symbol);
+        if (signal_type) params.append('signal_type', signal_type);
+        if (status) params.append('status', status);
+        if (min_confidence !== undefined) params.append('min_confidence', min_confidence.toString());
+        return `/signals/history?${params.toString()}`;
+    },
+    SIGNAL_EXPORT: (
+        days: number = 30,
+        format: string = 'csv',
+        symbol?: string,
+        signal_type?: string,
+        status?: string
+    ) => {
+        const params = new URLSearchParams();
+        params.append('days', days.toString());
+        params.append('format', format);
+        if (symbol) params.append('symbol', symbol);
+        if (signal_type) params.append('signal_type', signal_type);
+        if (status) params.append('status', status);
+        return `/signals/export?${params.toString()}`;
+    },
+    SIGNAL_PENDING: '/signals/pending',
+
     // System
     SYSTEM_STATUS: '/system/status',
+
+    // Settings
     SETTINGS: '/settings',
+    TOKENS: '/settings/tokens',  // SOTA Phase 26: Token watchlist
+    TOKENS_VALIDATE: (symbol: string) => `/settings/tokens/validate?symbol=${symbol}`,
+    TOKENS_SEARCH: (q: string = '', limit: number = 20) => `/settings/tokens/search?q=${q}&limit=${limit}`,
+    TOKENS_ADD: '/settings/tokens/add',
+    TOKENS_REMOVE: (symbol: string) => `/settings/tokens/${symbol}`,
 };
 
 export default {

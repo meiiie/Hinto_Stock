@@ -262,11 +262,12 @@ class SQLiteMarketDataRepository(MarketDataRepository):
         self,
         timeframe: str,
         start: datetime,
-        end: datetime
+        end: datetime,
+        symbol: str = 'btcusdt'  # SOTA: Added for multi-symbol support
     ) -> List[MarketData]:
         """Get candles within date range"""
         try:
-            table = self._get_table_name(timeframe)
+            table = self._get_table_name(symbol, timeframe)
             
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -295,11 +296,12 @@ class SQLiteMarketDataRepository(MarketDataRepository):
     def get_candle_by_timestamp(
         self,
         timeframe: str,
-        timestamp: datetime
+        timestamp: datetime,
+        symbol: str = 'btcusdt'  # SOTA: Added for multi-symbol support
     ) -> Optional[MarketData]:
         """Get specific candle by timestamp"""
         try:
-            table = self._get_table_name(timeframe)
+            table = self._get_table_name(symbol, timeframe)
             
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -324,10 +326,10 @@ class SQLiteMarketDataRepository(MarketDataRepository):
         except Exception as e:
             raise RepositoryError(f"Failed to get candle: {e}", e)
     
-    def get_record_count(self, timeframe: str) -> int:
+    def get_record_count(self, timeframe: str, symbol: str = 'btcusdt') -> int:
         """Get total record count"""
         try:
-            table = self._get_table_name(timeframe)
+            table = self._get_table_name(symbol, timeframe)
             
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -336,10 +338,10 @@ class SQLiteMarketDataRepository(MarketDataRepository):
         except Exception as e:
             raise RepositoryError(f"Failed to get record count: {e}", e)
     
-    def get_latest_timestamp(self, timeframe: str) -> Optional[datetime]:
+    def get_latest_timestamp(self, timeframe: str, symbol: str = 'btcusdt') -> Optional[datetime]:
         """Get latest timestamp"""
         try:
-            table = self._get_table_name(timeframe)
+            table = self._get_table_name(symbol, timeframe)
             
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -349,10 +351,14 @@ class SQLiteMarketDataRepository(MarketDataRepository):
         except Exception as e:
             raise RepositoryError(f"Failed to get latest timestamp: {e}", e)
     
-    def delete_candles_before(self, timeframe: str, before: datetime) -> int:
-        """Delete candles before date"""
+    def delete_candles_before(self, timeframe: str, before: datetime, symbol: str = 'btcusdt') -> int:
+        """
+        Delete candles before date for a specific symbol.
+        
+        SOTA Multi-Symbol: Now supports per-symbol cleanup.
+        """
         try:
-            table = self._get_table_name(timeframe)
+            table = self._get_table_name(symbol, timeframe)
             
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -392,10 +398,10 @@ class SQLiteMarketDataRepository(MarketDataRepository):
         except Exception as e:
             raise RepositoryError(f"Failed to backup database: {e}", e)
     
-    def get_table_info(self, timeframe: str) -> dict:
+    def get_table_info(self, timeframe: str, symbol: str = 'btcusdt') -> dict:
         """Get table information"""
         try:
-            table = self._get_table_name(timeframe)
+            table = self._get_table_name(symbol, timeframe)
             
             with self._get_connection() as conn:
                 cursor = conn.cursor()

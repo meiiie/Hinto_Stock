@@ -248,7 +248,7 @@ class SignalLifecycleService:
     
     def get_total_count(self, days: int = 7) -> int:
         """
-        Get total count of signals for pagination.
+        Get total count of signals in the last N days.
         
         Args:
             days: Number of days to look back
@@ -258,6 +258,74 @@ class SignalLifecycleService:
         """
         start_date = datetime.now() - timedelta(days=days)
         return self.repo.get_total_count(start_date=start_date)
+    
+    def get_filtered_signal_history(
+        self,
+        days: int = 7,
+        limit: int = 100,
+        offset: int = 0,
+        symbol: Optional[str] = None,
+        signal_type: Optional[str] = None,
+        status: Optional[str] = None,
+        min_confidence: Optional[float] = None
+    ) -> List[TradingSignal]:
+        """
+        Get filtered signal history for analysis.
+        
+        SOTA Phase 25: Server-side filtering for signal research.
+        
+        Args:
+            days: Number of days to look back
+            limit: Maximum number of results
+            offset: Number of results to skip
+            symbol: Filter by trading symbol (e.g., BTCUSDT)
+            signal_type: Filter by type (buy or sell)
+            status: Filter by status (generated, pending, executed, expired)
+            min_confidence: Minimum confidence threshold
+            
+        Returns:
+            List of filtered signals
+        """
+        start_date = datetime.now() - timedelta(days=days)
+        return self.repo.get_filtered_history(
+            start_date=start_date,
+            limit=limit,
+            offset=offset,
+            symbol=symbol,
+            signal_type=signal_type,
+            status=status,
+            min_confidence=min_confidence
+        )
+    
+    def get_filtered_count(
+        self,
+        days: int = 7,
+        symbol: Optional[str] = None,
+        signal_type: Optional[str] = None,
+        status: Optional[str] = None,
+        min_confidence: Optional[float] = None
+    ) -> int:
+        """
+        Get total count of filtered signals.
+        
+        Args:
+            days: Number of days to look back
+            symbol: Filter by symbol
+            signal_type: Filter by type
+            status: Filter by status
+            min_confidence: Minimum confidence
+            
+        Returns:
+            Total count matching filters
+        """
+        start_date = datetime.now() - timedelta(days=days)
+        return self.repo.get_filtered_count(
+            start_date=start_date,
+            symbol=symbol,
+            signal_type=signal_type,
+            status=status,
+            min_confidence=min_confidence
+        )
     
     def update_signal_outcome(
         self,

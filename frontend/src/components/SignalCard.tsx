@@ -77,8 +77,62 @@ export default function SignalCard({ signal, currentPrice, onExecute, onDismiss 
         borderRadius: '8px',
         border: `1px solid ${C.border}`,
       }}>
-        <div style={{ textAlign: 'center', color: C.text3, fontSize: '13px' }}>
-          <div style={{ fontSize: '24px', marginBottom: '8px' }}>📡</div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: C.text3, fontSize: '13px' }}>
+          {/* Professional SVG Radar Icon with pulse animation */}
+          <svg
+            width="32"
+            height="32"
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            style={{ marginBottom: '8px' }}
+          >
+            {/* Radar waves with animation */}
+            <circle
+              cx="12"
+              cy="12"
+              r="10"
+              stroke={C.text3}
+              strokeWidth="1"
+              strokeOpacity="0.3"
+              fill="none"
+            />
+            <circle
+              cx="12"
+              cy="12"
+              r="6"
+              stroke={C.text3}
+              strokeWidth="1"
+              strokeOpacity="0.5"
+              fill="none"
+            />
+            <circle
+              cx="12"
+              cy="12"
+              r="2"
+              fill={C.yellow}
+            />
+            {/* Radar sweep line */}
+            <line
+              x1="12"
+              y1="12"
+              x2="12"
+              y2="2"
+              stroke={C.yellow}
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              style={{
+                transformOrigin: '12px 12px',
+                animation: 'spin 2s linear infinite',
+              }}
+            />
+          </svg>
+          <style>{`
+            @keyframes spin {
+              from { transform: rotate(0deg); }
+              to { transform: rotate(360deg); }
+            }
+          `}</style>
           Waiting for signal...
         </div>
       </div>

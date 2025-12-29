@@ -6,7 +6,7 @@ REST API client for fetching historical data from Binance.
 
 import requests
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 
 from ...domain.entities.candle import Candle
@@ -132,7 +132,10 @@ class BinanceRestClient:
             close_price = float(kline[4])
             volume = float(kline[5])
             
-            timestamp = datetime.fromtimestamp(timestamp_ms / 1000)
+            # CRITICAL SOTA FIX: Use timezone-aware datetime to ensure correct .timestamp() conversion
+            # utcfromtimestamp creates NAIVE datetime, .timestamp() wrongly assumes local time
+            # fromtimestamp with tz=timezone.utc creates AWARE datetime, .timestamp() works correctly
+            timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
             
             return Candle(
                 timestamp=timestamp,

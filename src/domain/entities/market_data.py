@@ -76,9 +76,37 @@ class MarketData:
         """Get the timestamp from the candle"""
         return self.candle.timestamp
     
+    # =========================================================================
+    # SOTA Property Delegation (Dec 2025)
+    # 
+    # Following institutional trading patterns, aggregate roots should expose
+    # commonly-accessed child properties via delegation for API consistency.
+    # This prevents bugs like `candles[0].close` (should be .candle.close)
+    # =========================================================================
+    
+    @property
+    def open(self) -> float:
+        """Delegate to candle.open for API consistency"""
+        return self.candle.open
+    
+    @property
+    def high(self) -> float:
+        """Delegate to candle.high for API consistency"""
+        return self.candle.high
+    
+    @property
+    def low(self) -> float:
+        """Delegate to candle.low for API consistency"""
+        return self.candle.low
+    
+    @property
+    def close(self) -> float:
+        """Delegate to candle.close for API consistency"""
+        return self.candle.close
+    
     @property
     def close_price(self) -> float:
-        """Get the closing price from the candle"""
+        """Get the closing price from the candle (alias for .close)"""
         return self.candle.close
     
     @property

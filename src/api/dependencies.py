@@ -45,7 +45,8 @@ def get_paper_trading_service() -> PaperTradingService:
     Get singleton instance of PaperTradingService.
     """
     repo = get_order_repository()
-    return PaperTradingService(repository=repo)
+    market_data_repo = get_market_data_repository()  # SOTA FIX: Inject Market Data Repo
+    return PaperTradingService(repository=repo, market_data_repository=market_data_repo)
 
 
 def get_realtime_service_for_symbol(symbol: str = 'btcusdt') -> RealtimeService:

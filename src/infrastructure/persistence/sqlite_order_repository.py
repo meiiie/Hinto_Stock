@@ -6,6 +6,42 @@ from contextlib import contextmanager
 from src.domain.entities.paper_position import PaperPosition
 from src.domain.repositories.i_order_repository import IOrderRepository
 
+
+def _parse_datetime(value) -> Optional[datetime]:
+    """
+    SOTA: Robust datetime parsing that handles multiple formats.
+    Returns timezone-NAIVE datetime for compatibility with datetime.now().
+    
+    Handles:
+    - Standard ISO format (2025-12-28T12:00:00)
+    - UTC 'Z' suffix (2025-12-28T12:00:00Z)
+    - Timezone offset (2025-12-28T12:00:00+00:00)
+    - None/empty values
+    """
+    if not value:
+        return None
+    
+    try:
+        # Handle string type
+        if isinstance(value, str):
+            # Replace 'Z' suffix with UTC offset (Python < 3.11 compatibility)
+            normalized = value.replace('Z', '+00:00')
+            parsed = datetime.fromisoformat(normalized)
+            # CRITICAL: Strip timezone to return naive datetime
+            # This ensures compatibility with datetime.now() comparisons
+            if parsed.tzinfo is not None:
+                parsed = parsed.replace(tzinfo=None)
+            return parsed
+        # If already datetime, strip timezone if present
+        elif isinstance(value, datetime):
+            if value.tzinfo is not None:
+                return value.replace(tzinfo=None)
+            return value
+        else:
+            return None
+    except (ValueError, TypeError):
+        return None
+
 class SQLiteOrderRepository(IOrderRepository):
     """SQLite implementation of Position Repository (Futures)"""
     
@@ -218,8 +254,8 @@ class SQLiteOrderRepository(IOrderRepository):
             liquidation_price=row['liquidation_price'],
             stop_loss=row['stop_loss'],
             take_profit=row['take_profit'],
-            open_time=datetime.fromisoformat(row['open_time']),
-            close_time=datetime.fromisoformat(row['close_time']) if row['close_time'] else None,
+            open_time=_parse_datetime(row['open_time']) or datetime.now(),  # SOTA: Safe parsing
+            close_time=_parse_datetime(row['close_time']),  # SOTA: Safe parsing (can be None)
             realized_pnl=row['realized_pnl'],
             exit_reason=row['exit_reason'],
             highest_price=highest_price,
@@ -236,32 +272,61 @@ class SQLiteOrderRepository(IOrderRepository):
             cursor.execute("UPDATE paper_account SET balance = 10000.0 WHERE id = 1")
             conn.commit()
 
-    def get_closed_orders_paginated(self, page: int, limit: int) -> Tuple[List[PaperPosition], int]:
+    def get_closed_orders_paginated(
+        self, page: int, limit: int,
+        symbol: Optional[str] = None,
+        side: Optional[str] = None,
+        pnl_filter: Optional[str] = None  # 'profit', 'loss', or None for all
+    ) -> Tuple[List[PaperPosition], int]:
         """
-        Get closed orders with pagination.
+        Get closed orders with pagination and optional filters.
+        
+        SOTA Phase 24c: Server-side filtering before pagination.
         
         Args:
             page: Page number (1-indexed)
             limit: Number of items per page
+            symbol: Optional filter by symbol (e.g., 'BTCUSDT')
+            side: Optional filter by side ('LONG' or 'SHORT')
+            pnl_filter: 'profit' for P&L > 0, 'loss' for P&L < 0, None for all
             
         Returns:
-            Tuple of (list of positions, total count)
+            Tuple of (list of positions, total count matching filters)
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
-            # Get total count
-            cursor.execute("SELECT COUNT(*) FROM paper_positions WHERE status = 'CLOSED'")
+            # Build dynamic WHERE clause
+            where_clauses = ["status = 'CLOSED'"]
+            params: List = []
+            
+            if symbol:
+                where_clauses.append("symbol = ?")
+                params.append(symbol.lower())  # SOTA FIX: DB stores lowercase (bnbusdt not BNBUSDT)
+            
+            if side:
+                where_clauses.append("side = ?")
+                params.append(side.upper())
+            
+            if pnl_filter == 'profit':
+                where_clauses.append("realized_pnl > 0")
+            elif pnl_filter == 'loss':
+                where_clauses.append("realized_pnl < 0")
+            
+            where_sql = " AND ".join(where_clauses)
+            
+            # Get total count (with filters)
+            cursor.execute(f"SELECT COUNT(*) FROM paper_positions WHERE {where_sql}", params)
             total_count = cursor.fetchone()[0]
             
-            # Get paginated results (sorted by entry_time descending)
+            # Get paginated results (sorted by close_time descending)
             offset = (page - 1) * limit
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT * FROM paper_positions 
-                WHERE status = 'CLOSED' 
+                WHERE {where_sql}
                 ORDER BY open_time DESC 
                 LIMIT ? OFFSET ?
-            """, (limit, offset))
+            """, params + [limit, offset])
             
             rows = cursor.fetchall()
             positions = [self._row_to_position(row) for row in rows]

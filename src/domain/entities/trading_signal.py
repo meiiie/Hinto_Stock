@@ -13,7 +13,7 @@ Enhanced with Signal Lifecycle fields:
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Any
 import uuid
@@ -109,7 +109,15 @@ class TradingSignal:
     def execution_latency_ms(self) -> Optional[float]:
         """Time from generation to execution in milliseconds."""
         if self.generated_at and self.executed_at:
-            delta = self.executed_at - self.generated_at
+            # SOTA FIX: Handle naive/aware datetime mismatch safely
+            gen_at = self.generated_at
+            exec_at = self.executed_at
+            # Make both naive for safe comparison (remove tzinfo if present)
+            if gen_at.tzinfo is not None:
+                gen_at = gen_at.replace(tzinfo=None)
+            if exec_at.tzinfo is not None:
+                exec_at = exec_at.replace(tzinfo=None)
+            delta = exec_at - gen_at
             return delta.total_seconds() * 1000
         return None
     
@@ -122,18 +130,18 @@ class TradingSignal:
     def mark_pending(self) -> None:
         """Mark signal as shown to user."""
         self.status = SignalStatus.PENDING
-        self.pending_at = datetime.now()
+        self.pending_at = datetime.now(timezone.utc)
     
     def mark_executed(self, order_id: str) -> None:
         """Mark signal as executed with order link."""
         self.status = SignalStatus.EXECUTED
-        self.executed_at = datetime.now()
+        self.executed_at = datetime.now(timezone.utc)
         self.order_id = order_id
     
     def mark_expired(self) -> None:
         """Mark signal as expired."""
         self.status = SignalStatus.EXPIRED
-        self.expired_at = datetime.now()
+        self.expired_at = datetime.now(timezone.utc)
     
     def mark_rejected(self, reason: str) -> None:
         """Mark signal as rejected by filter."""

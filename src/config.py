@@ -38,8 +38,12 @@ class MultiTokenConfig:
     """
     Multi-token support configuration.
     
-    Supports running multiple trading symbols in parallel.
-    Symbols can be configured via SYMBOLS env variable (comma-separated).
+    SOTA Phase: Dynamic token loading from watchlist file.
+    
+    Priority order:
+    1. ENV variable SYMBOLS (comma-separated) - highest priority
+    2. data/tokens.json watchlist (enabled tokens only)
+    3. DEFAULT_SYMBOLS fallback
     
     Example:
         SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT
@@ -47,13 +51,16 @@ class MultiTokenConfig:
     symbols: list = None
     
     def __post_init__(self):
-        """Load symbols from environment or use defaults."""
+        """Load symbols from environment, tokens.json, or use defaults."""
         if self.symbols is None:
             env_symbols = os.getenv("SYMBOLS", "")
             if env_symbols:
+                # ENV has highest priority
                 self.symbols = [s.strip().upper() for s in env_symbols.split(",") if s.strip()]
+                logging.info(f"📊 MultiToken: Using ENV SYMBOLS")
             else:
-                self.symbols = DEFAULT_SYMBOLS.copy()
+                # SOTA: Load from tokens.json watchlist
+                self.symbols = self._load_from_watchlist()
         
         # Validate all symbols end with USDT (Binance perpetuals)
         valid_symbols = []
@@ -65,6 +72,61 @@ class MultiTokenConfig:
         
         self.symbols = valid_symbols
         logging.info(f"📊 MultiToken: {len(self.symbols)} symbols configured: {', '.join(self.symbols)}")
+    
+    def _load_from_watchlist(self) -> list:
+        """
+        SOTA: Load enabled tokens from SQLite database.
+        
+        Reads from the same location where Settings API saves custom tokens.
+        Falls back to DEFAULT_SYMBOLS if database not accessible.
+        """
+        import sqlite3
+        db_path = Path("data/trading_system.db")
+        
+        try:
+            if db_path.exists():
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                
+                # Get custom tokens
+                cursor.execute("SELECT value FROM settings WHERE key = 'custom_tokens'")
+                row = cursor.fetchone()
+                custom_tokens = set(row[0].split(',')) if row and row[0] else set()
+                logging.info(f"📊 DEBUG: custom_tokens from DB = {custom_tokens}")
+                
+                # Get enabled tokens
+                cursor.execute("SELECT value FROM settings WHERE key = 'enabled_tokens'")
+                row = cursor.fetchone()
+                if row and row[0]:
+                    enabled_tokens = set(row[0].split(','))
+                else:
+                    # No enabled_tokens setting - use all defaults + custom
+                    enabled_tokens = set(DEFAULT_SYMBOLS) | custom_tokens
+                logging.info(f"📊 DEBUG: enabled_tokens from DB = {enabled_tokens}")
+                
+                conn.close()
+                
+                # Combine default + custom tokens that are enabled
+                all_available = set(DEFAULT_SYMBOLS) | custom_tokens
+                logging.info(f"📊 DEBUG: DEFAULT_SYMBOLS = {DEFAULT_SYMBOLS}")
+                logging.info(f"📊 DEBUG: all_available = {all_available}")
+                
+                result = [t for t in all_available if t in enabled_tokens]
+                logging.info(f"📊 DEBUG: result = {result}")
+                
+                if result:
+                    logging.info(f"📊 MultiToken: Loaded {len(result)} tokens from database "
+                               f"(default: {len(DEFAULT_SYMBOLS)}, custom: {len(custom_tokens)})")
+                    return result
+                else:
+                    logging.warning("📊 MultiToken: No enabled tokens, using defaults")
+                    return DEFAULT_SYMBOLS.copy()
+            else:
+                logging.info("📊 MultiToken: Database not found, using defaults")
+                return DEFAULT_SYMBOLS.copy()
+        except Exception as e:
+            logging.error(f"📊 MultiToken: Error reading database: {e}, using defaults")
+            return DEFAULT_SYMBOLS.copy()
 
 
 @dataclass

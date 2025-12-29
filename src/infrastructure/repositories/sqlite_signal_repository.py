@@ -17,6 +17,40 @@ from src.domain.value_objects.signal_status import SignalStatus
 from src.domain.repositories.i_signal_repository import ISignalRepository
 
 
+class NumpyJSONEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder that handles numpy and datetime types.
+    
+    SOTA FIX: Signals contain numpy types from indicator calculations
+    (pandas/numpy) that standard json.dumps() cannot serialize.
+    """
+    
+    def default(self, obj):
+        import numpy as np
+        
+        # Handle datetime
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        
+        # Handle numpy bool
+        if isinstance(obj, (np.bool_, np.bool8)):
+            return bool(obj)
+        
+        # Handle numpy integers
+        if isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+            return int(obj)
+        
+        # Handle numpy floats
+        if isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
+            return float(obj)
+        
+        # Handle numpy arrays
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        
+        return super().default(obj)
+
+
 class SQLiteSignalRepository(ISignalRepository):
     """
     SQLite implementation of signal repository.
@@ -91,8 +125,44 @@ class SQLiteSignalRepository(ISignalRepository):
             ON signals(order_id)
         """)
         
+        # SOTA: Auto-migration for schema updates without manual intervention
+        try:
+            cursor.execute("PRAGMA table_info(signals)")
+            existing_columns = {info[1] for info in cursor.fetchall()}
+            
+            # Map of column_name -> column_definition
+            required_columns = {
+                'symbol': "TEXT NOT NULL DEFAULT 'BTCUSDT'",
+                'entry_price': "REAL",
+                'stop_loss': "REAL",
+                'tp1': "REAL",
+                'tp2': "REAL",
+                'tp3': "REAL",
+                'position_size': "REAL",
+                'risk_reward_ratio': "REAL",
+                'pending_at': "TIMESTAMP",
+                'executed_at': "TIMESTAMP",
+                'expired_at': "TIMESTAMP",
+                'order_id': "TEXT",
+                'indicators_json': "TEXT",
+                'reasons_json': "TEXT",
+                'outcome_json': "TEXT"
+            }
+            
+            for col_name, col_def in required_columns.items():
+                if col_name not in existing_columns:
+                    self.logger.warning(f"Schema mismatch: '{col_name}' column missing. Migrating...")
+                    cursor.execute(f"ALTER TABLE signals ADD COLUMN {col_name} {col_def}")
+                    self.logger.info(f"✅ Schema migration: Added '{col_name}' column")
+                    
+            conn.commit()
+            
+        except Exception as e:
+            self.logger.error(f"Migration check failed: {e}")
+        
         conn.commit()
         conn.close()
+
     
     def save(self, signal: TradingSignal) -> None:
         """Persist a new signal."""
@@ -104,14 +174,15 @@ class SQLiteSignalRepository(ISignalRepository):
         try:
             cursor.execute("""
                 INSERT INTO signals (
-                    id, signal_type, status, confidence, price,
+                    id, symbol, signal_type, status, confidence, price,
                     entry_price, stop_loss, tp1, tp2, tp3,
                     position_size, risk_reward_ratio,
                     generated_at, pending_at, executed_at, expired_at,
                     order_id, indicators_json, reasons_json, outcome_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 signal.id,
+                signal.symbol,
                 signal.signal_type.value,
                 signal.status.value,
                 signal.confidence,
@@ -128,9 +199,9 @@ class SQLiteSignalRepository(ISignalRepository):
                 signal.executed_at.isoformat() if signal.executed_at else None,
                 signal.expired_at.isoformat() if signal.expired_at else None,
                 signal.order_id,
-                json.dumps(signal.indicators),
-                json.dumps(signal.reasons),
-                json.dumps(signal.outcome) if signal.outcome else None
+                json.dumps(signal.indicators, cls=NumpyJSONEncoder),
+                json.dumps(signal.reasons, cls=NumpyJSONEncoder),
+                json.dumps(signal.outcome, cls=NumpyJSONEncoder) if signal.outcome else None
             ))
             
             conn.commit()
@@ -163,7 +234,7 @@ class SQLiteSignalRepository(ISignalRepository):
                 signal.executed_at.isoformat() if signal.executed_at else None,
                 signal.expired_at.isoformat() if signal.expired_at else None,
                 signal.order_id,
-                json.dumps(signal.outcome) if signal.outcome else None,
+                json.dumps(signal.outcome, cls=NumpyJSONEncoder) if signal.outcome else None,
                 signal.id
             ))
             
@@ -307,6 +378,125 @@ class SQLiteSignalRepository(ISignalRepository):
         finally:
             conn.close()
     
+    def get_filtered_history(
+        self,
+        start_date: Optional[datetime] = None,
+        limit: int = 100,
+        offset: int = 0,
+        symbol: Optional[str] = None,
+        signal_type: Optional[str] = None,
+        status: Optional[str] = None,
+        min_confidence: Optional[float] = None
+    ) -> List[TradingSignal]:
+        """
+        Get filtered signal history for analysis.
+        
+        SOTA Phase 25: Server-side filtering for signal research.
+        
+        Args:
+            start_date: Filter signals after this date
+            limit: Maximum number of results
+            offset: Number of results to skip
+            symbol: Filter by trading symbol (e.g., BTCUSDT)
+            signal_type: Filter by type (buy or sell)
+            status: Filter by status (generated, pending, executed, expired)
+            min_confidence: Minimum confidence threshold
+            
+        Returns:
+            List of filtered signals
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            query = "SELECT * FROM signals WHERE 1=1"
+            params = []
+            
+            if start_date:
+                query += " AND generated_at >= ?"
+                params.append(start_date.isoformat())
+            
+            if symbol:
+                query += " AND UPPER(symbol) = ?"
+                params.append(symbol.upper())
+            
+            if signal_type:
+                query += " AND signal_type = ?"
+                params.append(signal_type.lower())
+            
+            if status:
+                query += " AND status = ?"
+                params.append(status.lower())
+            
+            if min_confidence is not None:
+                query += " AND confidence >= ?"
+                params.append(min_confidence)
+            
+            query += " ORDER BY generated_at DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+            
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            
+            return [self._row_to_signal(row) for row in rows]
+            
+        finally:
+            conn.close()
+    
+    def get_filtered_count(
+        self,
+        start_date: Optional[datetime] = None,
+        symbol: Optional[str] = None,
+        signal_type: Optional[str] = None,
+        status: Optional[str] = None,
+        min_confidence: Optional[float] = None
+    ) -> int:
+        """
+        Get total count of filtered signals.
+        
+        Args:
+            start_date: Filter signals after this date
+            symbol: Filter by symbol
+            signal_type: Filter by type
+            status: Filter by status
+            min_confidence: Minimum confidence
+            
+        Returns:
+            Total count matching filters
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            query = "SELECT COUNT(*) FROM signals WHERE 1=1"
+            params = []
+            
+            if start_date:
+                query += " AND generated_at >= ?"
+                params.append(start_date.isoformat())
+            
+            if symbol:
+                query += " AND UPPER(symbol) = ?"
+                params.append(symbol.upper())
+            
+            if signal_type:
+                query += " AND signal_type = ?"
+                params.append(signal_type.lower())
+            
+            if status:
+                query += " AND status = ?"
+                params.append(status.lower())
+            
+            if min_confidence is not None:
+                query += " AND confidence >= ?"
+                params.append(min_confidence)
+            
+            cursor.execute(query, params)
+            return cursor.fetchone()[0]
+            
+        finally:
+            conn.close()
+
     def expire_old_pending(self, ttl_seconds: int = 300) -> int:
         """Expire pending signals older than TTL."""
         conn = self._get_connection()
@@ -360,6 +550,7 @@ class SQLiteSignalRepository(ISignalRepository):
         
         return TradingSignal(
             id=row['id'],
+            symbol=row['symbol'] if row['symbol'] else 'BTCUSDT',
             signal_type=SignalType(row['signal_type']),
             status=SignalStatus(row['status']),
             confidence=row['confidence'],

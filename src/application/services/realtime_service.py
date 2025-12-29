@@ -814,12 +814,24 @@ class RealtimeService:
                 self._latest_signal = signal
                 self.logger.info(f"Signal generated: {signal}")
                 
-                # Send to Paper Engine
+                # SOTA FIX: Save signal FIRST to get signal_id
+                saved_signal = self._notify_signal_callbacks(signal)
+                
+                # Send to Paper Engine (creates order)
                 if self.paper_service:
                     self.paper_service.on_signal_received(signal, self.symbol)
-                
-                # Notify signal callbacks
-                self._notify_signal_callbacks(signal)
+                    
+                    # SOTA FIX: Link signal to order via mark_executed
+                    if saved_signal and self._lifecycle_service:
+                        try:
+                            pending_orders = self.paper_service.repo.get_pending_orders()
+                            for order in pending_orders:
+                                if order.symbol.lower() == self.symbol.lower():
+                                    self._lifecycle_service.mark_executed(saved_signal.id, order.id)
+                                    self.logger.info(f"🔗 Signal {saved_signal.id[:8]}... linked to order {order.id[:8]}...")
+                                    break
+                        except Exception as e:
+                            self.logger.error(f"Error linking signal to order: {e}")
                 
         except Exception as e:
             self.logger.error(f"Error generating signals: {e}")
@@ -862,12 +874,20 @@ class RealtimeService:
             self.logger.error(f"Error generating 1h signals: {e}")
 
     
-    def _notify_signal_callbacks(self, signal: TradingSignal) -> None:
+    def _notify_signal_callbacks(self, signal: TradingSignal) -> Optional[TradingSignal]:
         """
         Notify all signal callbacks, persist to DB, and broadcast via EventBus.
         
-        SOTA FIX: This was missing signal persistence and WebSocket broadcast.
+        SOTA FIX: Returns saved signal for linking with orders.
+        
+        Returns:
+            Optional[TradingSignal]: The saved signal with ID, or None if not saved
         """
+        # DEBUG: Log signal and lifecycle service status
+        self.logger.info(f"🔔 Signal callback: {signal.signal_type.value} @ ${signal.price:.2f} (lifecycle_service: {'OK' if self._lifecycle_service else 'NONE'})")
+        
+        saved_signal = None
+        
         # 1. SOTA FIX: Save signal to database via lifecycle service
         if self._lifecycle_service:
             try:
@@ -880,14 +900,14 @@ class RealtimeService:
         if self._event_bus:
             try:
                 signal_data = {
-                    'id': getattr(signal, 'id', None),
+                    'id': getattr(signal, 'id', None) or (saved_signal.id if saved_signal else None),
                     'signal_type': signal.signal_type.value,
                     'price': signal.price,
                     'entry_price': signal.entry_price,
                     'stop_loss': signal.stop_loss,
                     'tp_levels': signal.tp_levels,
                     'confidence': signal.confidence,
-                    'timeframe': signal.timeframe,
+                    'timeframe': '1m',  # SOTA FIX: TradingSignal has no timeframe field
                     'timestamp': signal.timestamp.isoformat() if signal.timestamp else None,
                     'meta': getattr(signal, 'meta', {}),
                 }
@@ -902,6 +922,8 @@ class RealtimeService:
                 callback(signal)
             except Exception as e:
                 self.logger.error(f"Error in signal callback: {e}")
+        
+        return saved_signal
     
     def _notify_update_callbacks(self) -> None:
         """Notify all update callbacks."""

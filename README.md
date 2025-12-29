@@ -2,7 +2,7 @@
 
 **Professional Desktop Trading Application**
 
-**Version:** 2.1 | **Status:** 🚀 Production Ready  
+**Version:** 2.2 | **Status:** 🚀 Production Ready  
 **Strategy:** Trend Pullback (VWAP + Bollinger Bands + StochRSI)  
 **Market:** Multi-Token (BTC, ETH, SOL, BNB, TAO, FET, ONDO) × Multi-Timeframe (1m, 15m, 1h)
 
@@ -15,6 +15,7 @@
 - **📦 Hybrid Data Layer** - SQLite persistence + Binance fallback (zero data loss on restart)
 - **🎨 Binance-Style UI** - Professional dark theme with token icons + TokenSelector
 - **📊 Advanced Charts** - TradingView Lightweight Charts with VWAP, BB, signals
+- **🗂️ Trade History Analytics** - Server-side filtering, Recharts visualizations, bulk CSV export
 - **⚡ State Machine** - BOOTSTRAP → SCANNING → IN_POSITION → COOLDOWN
 - **📱 Desktop App** - Tauri-powered native desktop application
 
@@ -260,6 +261,33 @@ import { TokenIcon } from './components/TokenIcon';
 THEME.spacing.md  // 16px
 THEME.sizing.chart.minHeight  // 400px
 THEME.status.buy  // #0ECB81
+```
+
+---
+
+### 🗂️ SOTA Trade History Analytics (Dec 2025)
+
+**Expert-level trading bot monitoring dashboard with institutional-grade features:**
+
+| Feature | Description |
+|---------|-------------|
+| **Server-Side Filtering** | Filter by Symbol, Side (LONG/SHORT), P&L (Profit/Loss) at SQL level |
+| **Bulk Export** | `/trades/export` endpoint downloads ALL matching trades as CSV |
+| **Exit Reason Analytics** | Win Rate, Avg P&L, Duration per exit type (TP, SL, Signal Reversal) |
+| **Risk Metrics** | Sharpe Ratio, Sortino Ratio, Calmar Ratio, Recovery Factor |
+| **Streak Tracking** | Current streak, Max consecutive wins/losses |
+| **Charts** | Recharts PieChart (Exit Distribution) + BarChart (P&L by Token) |
+
+**Tabbed Interface:**
+- **Tổng quan (Overview):** KPIs, Risk Metrics, Charts
+- **Theo Token (Per Token):** Symbol-level performance breakdown
+- **Lịch sử (History):** Paginated trade table with filters + Export
+
+**Key Endpoints:**
+```
+GET /trades/history?page=1&limit=20&symbol=BTCUSDT&side=LONG&pnl_filter=profit
+GET /trades/export?symbol=BTCUSDT&pnl_filter=profit  # All matching trades
+GET /trades/performance?days=365
 ```
 
 ---

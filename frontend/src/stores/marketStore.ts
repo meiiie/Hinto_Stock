@@ -173,13 +173,19 @@ export const useMarketStore = create<MarketStore>()(
         // Update candle data for a specific symbol and timeframe
         updateCandle: (symbol: string, timeframe: '1m' | '15m' | '1h', data: MarketData) => {
             const normalizedSymbol = symbol.toLowerCase();
+            const timeframeKey = timeframe === '1m' ? 'data1m'
+                : timeframe === '15m' ? 'data15m'
+                    : 'data1h';
+
+            // SOTA: Skip update if data hasn't changed (shallow equality on key primitives)
+            // This prevents unnecessary React re-renders when WebSocket sends duplicate data
+            const existing = get().symbolData[normalizedSymbol]?.[timeframeKey];
+            if (existing && existing.close === data.close && existing.time === data.time) {
+                return; // Data unchanged, skip Zustand set() to prevent re-renders
+            }
 
             set((state) => {
                 const existingData = state.symbolData[normalizedSymbol] || createEmptySymbolData();
-
-                const timeframeKey = timeframe === '1m' ? 'data1m'
-                    : timeframe === '15m' ? 'data15m'
-                        : 'data1h';
 
                 return {
                     symbolData: {

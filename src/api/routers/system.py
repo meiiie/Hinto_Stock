@@ -41,6 +41,92 @@ async def get_status():
     }
 
 
+@router.get("/debug/signal-persistence")
+async def debug_signal_persistence():
+    """
+    Debug endpoint to diagnose signal persistence issues.
+    
+    Checks:
+    1. Is _lifecycle_service injected into RealtimeService?
+    2. What DB path is SignalRepository using?
+    3. How many signals are in the database?
+    4. Recent signal IDs for comparison
+    """
+    from ..dependencies import get_container
+    
+    container = get_container()
+    result = {
+        "timestamp": datetime.now().isoformat(),
+        "services": {},
+        "database": {},
+        "diagnosis": []
+    }
+    
+    # 1. Check RealtimeService instances
+    symbols_checked = []
+    for key, instance in container._instances.items():
+        if key.startswith('realtime_service_'):
+            symbol = key.replace('realtime_service_', '')
+            has_lifecycle = hasattr(instance, '_lifecycle_service') and instance._lifecycle_service is not None
+            symbols_checked.append({
+                "symbol": symbol,
+                "has_lifecycle_service": has_lifecycle,
+                "lifecycle_service_id": id(instance._lifecycle_service) if has_lifecycle else None
+            })
+    
+    result["services"]["realtime_instances"] = symbols_checked
+    
+    # 2. Check SignalLifecycleService
+    if 'signal_lifecycle_service' in container._instances:
+        lifecycle_svc = container._instances['signal_lifecycle_service']
+        repo = lifecycle_svc.repo
+        result["services"]["lifecycle_service"] = {
+            "exists": True,
+            "id": id(lifecycle_svc),
+            "ttl_seconds": lifecycle_svc.ttl_seconds
+        }
+        result["database"]["db_path"] = getattr(repo, 'db_path', 'unknown')
+        
+        # 3. Count signals in DB
+        try:
+            signals = repo.get_history(limit=10)
+            result["database"]["signal_count"] = len(signals)
+            result["database"]["recent_signals"] = [
+                {
+                    "id": s.id[:16] if s.id else None,
+                    "symbol": s.symbol,
+                    "type": s.signal_type.value,
+                    "status": s.status.value,
+                    "generated_at": s.generated_at.isoformat() if s.generated_at else None
+                }
+                for s in signals[:5]
+            ]
+        except Exception as e:
+            result["database"]["error"] = str(e)
+    else:
+        result["services"]["lifecycle_service"] = {"exists": False}
+        result["diagnosis"].append("❌ SignalLifecycleService NOT in container instances!")
+    
+    # 4. Diagnosis
+    if not symbols_checked:
+        result["diagnosis"].append("❌ No RealtimeService instances found!")
+    else:
+        all_have_lifecycle = all(s["has_lifecycle_service"] for s in symbols_checked)
+        if all_have_lifecycle:
+            result["diagnosis"].append(f"✅ All {len(symbols_checked)} RealtimeService instances have _lifecycle_service")
+        else:
+            missing = [s["symbol"] for s in symbols_checked if not s["has_lifecycle_service"]]
+            result["diagnosis"].append(f"❌ Missing _lifecycle_service for: {missing}")
+    
+    if result["database"].get("signal_count", 0) == 0:
+        result["diagnosis"].append("⚠️ No signals in database yet")
+    else:
+        result["diagnosis"].append(f"✅ {result['database']['signal_count']} signals found in DB")
+    
+    return result
+
+
+
 @router.get("/debug/signal-check")
 async def debug_signal_check():
     """

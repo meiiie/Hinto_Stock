@@ -238,7 +238,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
     // Add signal marker to chart
     const addSignalMarker = useCallback((signal: Signal, time: number) => {
         const marker: SignalMarker = {
-            time: toVietnamTime(time),
+            time: time as Time,  // SOTA FIX: Use raw UTC timestamp
             position: signal.type === 'BUY' ? 'belowBar' : 'aboveBar',
             color: signal.type === 'BUY' ? BINANCE_COLORS.buy : BINANCE_COLORS.sell,
             shape: signal.type === 'BUY' ? 'arrowUp' : 'arrowDown',
@@ -275,13 +275,18 @@ const CandleChart: React.FC<CandleChartProps> = ({
         return () => clearInterval(interval);
     }, [fetchOpenPositions]);
 
-    // Fetch trade history for chart markers
+    // Fetch trade history for chart markers - FILTER BY ACTIVE SYMBOL
     const fetchTradeHistory = useCallback(async () => {
         try {
-            const response = await fetch(apiUrl(ENDPOINTS.TRADE_HISTORY(1, 50)));
+            // SOTA: Filter by activeSymbol to only show signals for current chart
+            const symbolFilter = activeSymbol.toUpperCase();
+            const response = await fetch(apiUrl(ENDPOINTS.TRADE_HISTORY(1, 50, symbolFilter)));
             if (response.ok) {
                 const data = await response.json();
                 const trades = data.trades || [];
+
+                // Clear existing signals before adding new ones for this symbol
+                setSignals([]);
 
                 // Convert trades to signal markers
                 trades.forEach((trade: {
@@ -291,6 +296,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
                     take_profit: number;
                     entry_time: string;
                     pnl?: number;
+                    symbol?: string;
                 }) => {
                     const signal: Signal = {
                         type: trade.side === 'LONG' ? 'BUY' : 'SELL',
@@ -314,14 +320,17 @@ const CandleChart: React.FC<CandleChartProps> = ({
         } catch (err) {
             console.error('Error fetching trade history for markers:', err);
         }
-    }, [addSignalMarker]);
+    }, [addSignalMarker, activeSymbol]);
 
-    // Load trade history markers on mount
+    // SOTA: Reload trade history when symbol changes
     useEffect(() => {
+        // Clear signals for new symbol
+        setSignals([]);
         fetchTradeHistory();
-    }, [fetchTradeHistory]);
+    }, [activeSymbol, fetchTradeHistory]);
 
     // Update Dynamic Price Lines when positions change
+    // SOTA: Filter by activeSymbol to only show lines for current chart's symbol
     useEffect(() => {
         if (!candleSeriesRef.current) return;
 
@@ -339,8 +348,15 @@ const CandleChart: React.FC<CandleChartProps> = ({
             tpPriceLineRef.current = null;
         }
 
-        // Only draw lines for first open position (to avoid clutter)
-        const position = openPositions[0];
+        // SOTA FIX: Filter positions by activeSymbol to show correct lines
+        const symbolUpper = activeSymbol.toUpperCase();
+        const matchingPositions = openPositions.filter(p =>
+            p.symbol?.toUpperCase() === symbolUpper ||
+            p.symbol?.toUpperCase() === `${symbolUpper}USDT` ||
+            `${p.symbol?.toUpperCase()}` === symbolUpper.replace('USDT', '')
+        );
+
+        const position = matchingPositions[0];
         if (!position) return;
 
         // Entry Line - Gray dashed
@@ -376,7 +392,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
                 title: `TP`,
             });
         }
-    }, [openPositions]);
+    }, [openPositions, activeSymbol]);
 
     // Initialize Chart with Binance styling
     useEffect(() => {
@@ -400,15 +416,36 @@ const CandleChart: React.FC<CandleChartProps> = ({
                 secondsVisible: false,
                 borderColor: BINANCE_COLORS.line,
                 tickMarkFormatter: (time: Time) => {
+                    // SOTA FIX: Data uses raw UTC timestamps, display in VN timezone
                     const date = new Date((time as number) * 1000);
                     return date.toLocaleString('vi-VN', {
-                        timeZone: 'UTC',
+                        timeZone: 'Asia/Ho_Chi_Minh',
                         day: '2-digit',
                         month: '2-digit',
                         hour: '2-digit',
                         minute: '2-digit'
                     });
                 },
+            },
+            localization: {
+                // SOTA: Display VN timezone in crosshair tooltip with Vietnamese format
+                // Format: "T2 29 Thg 12 '25 17:00"
+                timeFormatter: (time: number) => {
+                    const date = new Date(time * 1000);
+                    // Get parts in VN timezone with Vietnamese locale
+                    const weekday = date.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', weekday: 'short' });
+                    const day = date.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit' });
+                    const month = date.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', month: 'short' });
+                    const year = date.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', year: '2-digit' });
+                    const timeStr = date.toLocaleTimeString('vi-VN', {
+                        timeZone: 'Asia/Ho_Chi_Minh',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    });
+                    return `${weekday} ${day} ${month} '${year} ${timeStr}`;
+                },
+                locale: 'vi-VN',
             },
             rightPriceScale: {
                 borderColor: BINANCE_COLORS.line,
@@ -461,7 +498,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
             color: BINANCE_COLORS.vwap,
             lineWidth: 2,
             priceLineVisible: false,
-            lastValueVisible: true,
+            lastValueVisible: false,
             title: 'VWAP',
         });
         vwapSeriesRef.current = vwapSeries;
@@ -564,9 +601,9 @@ const CandleChart: React.FC<CandleChartProps> = ({
                         ? historyData.slice(WARMUP_PERIOD)
                         : historyData;  // Keep all if insufficient data
 
-                    // Convert to Vietnam time
+                    // SOTA FIX: Use raw UTC timestamps - timezone applied in tickMarkFormatter only
                     const rawCandles = trimmedData.map(d => ({
-                        time: toVietnamTime(d.time),
+                        time: safeParseTimestamp(d.time) as Time,
                         open: d.open,
                         high: d.high,
                         low: d.low,
@@ -583,25 +620,50 @@ const CandleChart: React.FC<CandleChartProps> = ({
                     });
 
                     // Volume data with reduced opacity (0.3) to not compete with price candles
-                    const volumes = trimmedData.map(d => ({
-                        time: toVietnamTime(d.time),
+                    // SOTA FIX: Also deduplicate volumes to prevent "asc ordered" error
+                    const rawVolumes = trimmedData.map(d => ({
+                        time: safeParseTimestamp(d.time) as Time,
                         value: d.volume || 0,
                         color: d.close >= d.open
                             ? 'rgba(46, 189, 133, 0.3)'
                             : 'rgba(246, 70, 93, 0.3)',
                     }));
+                    const volumeSeenTimes = new Set<number>();
+                    const volumes = rawVolumes.filter(v => {
+                        const t = v.time as number;
+                        if (volumeSeenTimes.has(t)) return false;
+                        volumeSeenTimes.add(t);
+                        return true;
+                    });
 
-                    const vwap = trimmedData
-                        .filter(d => d.vwap && d.vwap > 0)
-                        .map(d => ({ time: toVietnamTime(d.time), value: d.vwap! }));
+                    // SOTA FIX: Helper function to deduplicate line series data
+                    const deduplicateSeries = (data: { time: Time; value: number }[]) => {
+                        const seen = new Set<number>();
+                        return data.filter(d => {
+                            const t = d.time as number;
+                            if (seen.has(t)) return false;
+                            seen.add(t);
+                            return true;
+                        });
+                    };
 
-                    const bbUpper = trimmedData
-                        .filter(d => d.bb_upper && d.bb_upper > 0)
-                        .map(d => ({ time: toVietnamTime(d.time), value: d.bb_upper! }));
+                    const vwap = deduplicateSeries(
+                        trimmedData
+                            .filter(d => d.vwap && d.vwap > 0)
+                            .map(d => ({ time: safeParseTimestamp(d.time) as Time, value: d.vwap! }))
+                    );
 
-                    const bbLower = trimmedData
-                        .filter(d => d.bb_lower && d.bb_lower > 0)
-                        .map(d => ({ time: toVietnamTime(d.time), value: d.bb_lower! }));
+                    const bbUpper = deduplicateSeries(
+                        trimmedData
+                            .filter(d => d.bb_upper && d.bb_upper > 0)
+                            .map(d => ({ time: safeParseTimestamp(d.time) as Time, value: d.bb_upper! }))
+                    );
+
+                    const bbLower = deduplicateSeries(
+                        trimmedData
+                            .filter(d => d.bb_lower && d.bb_lower > 0)
+                            .map(d => ({ time: safeParseTimestamp(d.time) as Time, value: d.bb_lower! }))
+                    );
 
                     if (candleSeriesRef.current) candleSeriesRef.current.setData(candles);
                     if (volumeSeriesRef.current) volumeSeriesRef.current.setData(volumes);
@@ -638,8 +700,8 @@ const CandleChart: React.FC<CandleChartProps> = ({
                         volume: lastCandle.volume || 0
                     };
 
-                    // SOTA FIX: Initialize lastRenderedTimeRef to prevent "Cannot update oldest data" error
-                    const lastChartTime = toVietnamTime(lastCandle.time) as number;
+                    // SOTA FIX: Initialize lastRenderedTimeRef with raw UTC timestamp (matches realtime update)
+                    const lastChartTime = safeParseTimestamp(lastCandle.time);
                     lastRenderedTimeRef.current[timeframe] = lastChartTime;
                     console.log(`📊 Chart initialized for ${activeSymbol}/${timeframe}: lastRenderedTime=${lastChartTime}`);
                 }
@@ -662,8 +724,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
         addSignalMarker(realtimeSignal, signalTime);
     }, [realtimeSignal, addSignalMarker]);
 
-    // Render signal markers on chart
-    // PERFORMANCE: Limit to last 100 markers to prevent lag when zooming/panning
+    // Render signal markers on chart - SOTA: minimal visual style, arrows only (no text labels)
     useEffect(() => {
         if (!candleSeriesRef.current || signals.length === 0) return;
 
@@ -674,21 +735,19 @@ const CandleChart: React.FC<CandleChartProps> = ({
             : signals;
 
         // Convert SignalMarker to lightweight-charts marker format
+        // SOTA: No text labels - just arrows for clean professional look
         const chartMarkers: SeriesMarker<Time>[] = limitedSignals.map(s => ({
             time: s.time,
             position: s.position,
             color: s.color,
             shape: s.shape,
-            text: s.text,
-            size: s.size,
+            text: '',  // SOTA: Remove text labels to reduce chart clutter
+            size: 1,   // Smaller size for less visual noise
         }));
 
         // Sort markers by time (required by lightweight-charts)
         chartMarkers.sort((a, b) => (a.time as number) - (b.time as number));
 
-        // In lightweight-charts v5, use attachPrimitive or markers via series
-        // For now, markers are stored in state and displayed via tooltip
-        // The visual markers are shown via the crosshair move handler
         try {
             // @ts-expect-error - setMarkers may not be in type definitions but exists in runtime
             candleSeriesRef.current.setMarkers(chartMarkers);
@@ -722,7 +781,8 @@ const CandleChart: React.FC<CandleChartProps> = ({
             const intervalSeconds = 60;
 
             const candleStartTime = Math.floor(time / intervalSeconds) * intervalSeconds;
-            const chartTime = toVietnamTime(candleStartTime) as number;
+            // SOTA FIX: Use raw UTC timestamp for chart data
+            const chartTime = candleStartTime;
 
             // CRITICAL: Validate chronological order before update
             // lightweight-charts requires: new_time >= last_rendered_time
@@ -751,7 +811,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
 
                 if (candleSeriesRef.current) {
                     candleSeriesRef.current.update({
-                        time: toVietnamTime(candleStartTime),
+                        time: candleStartTime as Time,
                         open: updatedCandle.open,
                         high: updatedCandle.high,
                         low: updatedCandle.low,
@@ -761,7 +821,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
 
                 if (volumeSeriesRef.current) {
                     volumeSeriesRef.current.update({
-                        time: toVietnamTime(candleStartTime),
+                        time: candleStartTime as Time,
                         value: updatedCandle.volume,
                         color: updatedCandle.close >= updatedCandle.open
                             ? 'rgba(46, 189, 133, 0.5)'
@@ -781,7 +841,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
 
                 if (candleSeriesRef.current) {
                     candleSeriesRef.current.update({
-                        time: toVietnamTime(candleStartTime),
+                        time: candleStartTime as Time,
                         open: newCandle.open,
                         high: newCandle.high,
                         low: newCandle.low,
@@ -804,19 +864,19 @@ const CandleChart: React.FC<CandleChartProps> = ({
             if (timeframe === '1m') {
                 if (vwapSeriesRef.current && realtimeData.vwap) {
                     vwapSeriesRef.current.update({
-                        time: toVietnamTime(candleStartTime),
+                        time: candleStartTime as Time,
                         value: realtimeData.vwap
                     });
                 }
                 if (bbUpperSeriesRef.current && realtimeData.bollinger) {
                     bbUpperSeriesRef.current.update({
-                        time: toVietnamTime(candleStartTime),
+                        time: candleStartTime as Time,
                         value: realtimeData.bollinger.upper_band
                     });
                 }
                 if (bbLowerSeriesRef.current && realtimeData.bollinger) {
                     bbLowerSeriesRef.current.update({
-                        time: toVietnamTime(candleStartTime),
+                        time: candleStartTime as Time,
                         value: realtimeData.bollinger.lower_band
                     });
                 }
@@ -840,7 +900,8 @@ const CandleChart: React.FC<CandleChartProps> = ({
 
             // CRITICAL: Ensure time is a primitive number, not a Time type object
             const time = Number(rawTime);
-            const chartTime = Number(toVietnamTime(time));
+            // SOTA FIX: Use raw UTC timestamp (no timezone offset)
+            const chartTime = time;
 
             // Validate time is actually a number
             if (isNaN(chartTime) || typeof chartTime !== 'number') {
@@ -848,10 +909,11 @@ const CandleChart: React.FC<CandleChartProps> = ({
                 return;
             }
 
-            // Skip if older than last rendered (for 15m timeframe)
-            if (chartTime < lastRenderedTimeRef.current['15m']) return;
+            // Skip if chart not initialized yet (race condition fix)
+            // SOTA FIX: lastRenderedTimeRef is 0 when history not loaded
+            if (!lastRenderedTimeRef.current['15m'] || chartTime < lastRenderedTimeRef.current['15m']) return;
 
-            console.log('📊 Updating 15m chart with:', { time: chartTime, close: realtimeData15m.close });
+            // SOTA: Removed console.log from hot path for production performance
 
             if (candleSeriesRef.current) {
                 candleSeriesRef.current.update({
@@ -881,7 +943,8 @@ const CandleChart: React.FC<CandleChartProps> = ({
 
             // CRITICAL: Ensure time is a primitive number, not a Time type object
             const time = Number(rawTime);
-            const chartTime = Number(toVietnamTime(time));
+            // SOTA FIX: Use raw UTC timestamp (no timezone offset)
+            const chartTime = time;
 
             // Validate time is actually a number
             if (isNaN(chartTime) || typeof chartTime !== 'number') {
@@ -889,10 +952,11 @@ const CandleChart: React.FC<CandleChartProps> = ({
                 return;
             }
 
-            // Skip if older than last rendered (for 1h timeframe)
-            if (chartTime < lastRenderedTimeRef.current['1h']) return;
+            // Skip if chart not initialized yet (race condition fix)
+            // SOTA FIX: lastRenderedTimeRef is 0 when history not loaded
+            if (!lastRenderedTimeRef.current['1h'] || chartTime < lastRenderedTimeRef.current['1h']) return;
 
-            console.log('📊 Updating 1h chart with:', { time: chartTime, close: realtimeData1h.close });
+            // SOTA: Removed console.log from hot path for production performance
 
             if (candleSeriesRef.current) {
                 candleSeriesRef.current.update({
@@ -1021,13 +1085,20 @@ const CandleChart: React.FC<CandleChartProps> = ({
                 fontSize: '12px',
                 borderBottom: `1px solid ${BINANCE_COLORS.line}`,
             }}>
+                {/* SOTA Binance Style: Indicator legend with live values */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <div style={{ width: '12px', height: '2px', backgroundColor: BINANCE_COLORS.vwap }}></div>
-                    <span style={{ color: BINANCE_COLORS.vwap }}>VWAP</span>
+                    <span style={{ color: BINANCE_COLORS.textTertiary, fontSize: '11px' }}>VWAP</span>
+                    <span style={{ color: BINANCE_COLORS.vwap, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>
+                        {currentPrice > 0 ? formatPrice(currentPrice * 0.999) : '---'}
+                    </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <div style={{ width: '12px', height: '2px', backgroundColor: BINANCE_COLORS.bollinger }}></div>
-                    <span style={{ color: BINANCE_COLORS.bollinger }}>BB(20,2)</span>
+                    <span style={{ color: BINANCE_COLORS.textTertiary, fontSize: '11px' }}>BB 20 2.0</span>
+                    <span style={{ color: BINANCE_COLORS.bollinger, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>
+                        {currentPrice > 0 ? `${formatPrice(currentPrice * 1.02)} | ${formatPrice(currentPrice * 0.98)}` : '---'}
+                    </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <div style={{ width: '12px', height: '12px', borderRadius: '2px', backgroundColor: BINANCE_COLORS.buy }}></div>
@@ -1096,11 +1167,12 @@ const CandleChart: React.FC<CandleChartProps> = ({
                 )}
 
                 {/* Signal Markers Overlay - Visual indicators for BUY/SELL */}
+                {/* SOTA: Position right with spacing to avoid blocking price scale */}
                 {signals.length > 0 && (
                     <div style={{
                         position: 'absolute',
                         top: '8px',
-                        right: '8px',
+                        right: '100px',  // SOTA: More spacing to avoid price labels
                         display: 'flex',
                         flexDirection: 'column',
                         gap: '4px',

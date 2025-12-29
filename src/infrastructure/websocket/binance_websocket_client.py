@@ -7,7 +7,7 @@ WebSocket client for real-time Binance market data streaming.
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Callable, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
@@ -346,8 +346,9 @@ class BinanceWebSocketClient:
             
             # Calculate latency
             if 'E' in data:  # Event time
-                event_time = datetime.fromtimestamp(data['E'] / 1000)
-                latency = (datetime.now() - event_time).total_seconds() * 1000
+                # SOTA FIX: Use timezone-aware datetime for correct conversion
+                event_time = datetime.fromtimestamp(data['E'] / 1000, tz=timezone.utc)
+                latency = (datetime.now(tz=timezone.utc) - event_time).total_seconds() * 1000
                 self._latency_ms = int(latency)
             
             # Parse message to Candle entity

@@ -218,6 +218,32 @@ const Portfolio: React.FC = () => {
         fetchPortfolio();
     };
 
+    // SOTA: Cancel single pending order
+    const handleCancelPendingOrder = async (orderId: string) => {
+        try {
+            const response = await fetch(apiUrl(ENDPOINTS.CANCEL_PENDING_ORDER(orderId)), { method: 'DELETE' });
+            if (response.ok) {
+                fetchPortfolio();
+            }
+        } catch (err) {
+            console.error('Failed to cancel pending order:', err);
+        }
+    };
+
+    // SOTA: Cancel all pending orders
+    const handleCancelAllPending = async () => {
+        if (!pendingOrders.length) return;
+        if (!confirm(`Cancel all ${pendingOrders.length} pending orders?`)) return;
+        try {
+            const response = await fetch(apiUrl(ENDPOINTS.CANCEL_ALL_PENDING), { method: 'DELETE' });
+            if (response.ok) {
+                fetchPortfolio();
+            }
+        } catch (err) {
+            console.error('Failed to cancel all pending orders:', err);
+        }
+    };
+
     // Pagination logic for Pending Orders
     const pendingOrders = portfolio?.pending_orders || [];
     const totalPendingPages = Math.max(1, Math.ceil(pendingOrders.length / ITEMS_PER_PAGE));
@@ -293,46 +319,52 @@ const Portfolio: React.FC = () => {
 
             {/* Collapsible Pending Orders */}
             <div style={{ borderTop: `1px solid ${COLORS.bgTertiary}`, paddingTop: '16px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <div onClick={() => setIsPendingExpanded(!isPendingExpanded)} style={{ fontSize: '13px', fontWeight: 600, color: COLORS.textSecondary, margin: 0, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginBottom: '12px' }}>
+                <div onClick={() => setIsPendingExpanded(!isPendingExpanded)} style={{ fontSize: '13px', fontWeight: 600, color: COLORS.textSecondary, margin: 0, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginBottom: '12px', flex: 1 }}>
                     {isPendingExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                     <Clock size={14} style={{ color: COLORS.yellow }} /> Pending Orders ({pendingOrders.length})
                 </div>
-
-                {isPendingExpanded && (
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                        {/* Fixed height container - PREVENTS CLS */}
-                        <div style={{ minHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                            {pendingOrders.length === 0 ? (
-                                <div style={{ textAlign: 'center', padding: '40px', color: COLORS.textTertiary, fontSize: '12px' }}>No pending orders</div>
-                            ) : (
-                                paginatedPending.map(order => (
-                                    <PendingOrderCard
-                                        key={order.id}
-                                        order={order}
-                                        isExpanded={expandedOrderId === order.id}
-                                        onToggle={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
-                                    />
-                                ))
-                            )}
-                        </div>
-
-                        {/* Pagination */}
-                        {totalPendingPages > 1 && (
-                            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginTop: '12px', paddingTop: '12px', borderTop: `1px solid ${COLORS.bgTertiary}` }}>
-                                <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} style={{ padding: '6px 10px', borderRadius: '4px', border: 'none', background: COLORS.bgTertiary, color: COLORS.textSecondary, cursor: pendingPage === 1 ? 'not-allowed' : 'pointer', opacity: pendingPage === 1 ? 0.5 : 1 }}><ChevronLeft size={14} /></button>
-                                <span style={{ fontSize: '12px', color: COLORS.textSecondary }}>{pendingPage} / {totalPendingPages}</span>
-                                <button onClick={() => setPendingPage(p => Math.min(totalPendingPages, p + 1))} disabled={pendingPage === totalPendingPages} style={{ padding: '6px 10px', borderRadius: '4px', border: 'none', background: COLORS.bgTertiary, color: COLORS.textSecondary, cursor: pendingPage === totalPendingPages ? 'not-allowed' : 'pointer', opacity: pendingPage === totalPendingPages ? 0.5 : 1 }}><ChevronRight size={14} /></button>
-                            </div>
-                        )}
-                    </div>
+                {pendingOrders.length > 0 && (
+                    <button onClick={handleCancelAllPending} style={{ padding: '4px 10px', fontSize: '10px', fontWeight: 600, borderRadius: '4px', border: `1px solid ${COLORS.sell}40`, background: `${COLORS.sell}15`, color: COLORS.sell, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <XCircle size={12} /> Cancel All
+                    </button>
                 )}
             </div>
+
+            {isPendingExpanded && (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                    {/* Fixed height container - PREVENTS CLS */}
+                    <div style={{ minHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {pendingOrders.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: '40px', color: COLORS.textTertiary, fontSize: '12px' }}>No pending orders</div>
+                        ) : (
+                            paginatedPending.map(order => (
+                                <PendingOrderCard
+                                    key={order.id}
+                                    order={order}
+                                    isExpanded={expandedOrderId === order.id}
+                                    onToggle={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
+                                    onCancel={() => handleCancelPendingOrder(order.id)}
+                                />
+                            ))
+                        )}
+                    </div>
+
+                    {/* Pagination */}
+                    {totalPendingPages > 1 && (
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginTop: '12px', paddingTop: '12px', borderTop: `1px solid ${COLORS.bgTertiary}` }}>
+                            <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} style={{ padding: '6px 10px', borderRadius: '4px', border: 'none', background: COLORS.bgTertiary, color: COLORS.textSecondary, cursor: pendingPage === 1 ? 'not-allowed' : 'pointer', opacity: pendingPage === 1 ? 0.5 : 1 }}><ChevronLeft size={14} /></button>
+                            <span style={{ fontSize: '12px', color: COLORS.textSecondary }}>{pendingPage} / {totalPendingPages}</span>
+                            <button onClick={() => setPendingPage(p => Math.min(totalPendingPages, p + 1))} disabled={pendingPage === totalPendingPages} style={{ padding: '6px 10px', borderRadius: '4px', border: 'none', background: COLORS.bgTertiary, color: COLORS.textSecondary, cursor: pendingPage === totalPendingPages ? 'not-allowed' : 'pointer', opacity: pendingPage === totalPendingPages ? 0.5 : 1 }}><ChevronRight size={14} /></button>
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };
 
 // --- Pending Order Card (SignalCard-style) ---
-const PendingOrderCard = ({ order, isExpanded, onToggle }: { order: PendingOrder; isExpanded: boolean; onToggle: () => void }) => {
+const PendingOrderCard = ({ order, isExpanded, onToggle, onCancel }: { order: PendingOrder; isExpanded: boolean; onToggle: () => void; onCancel: () => void }) => {
     const sideColor = order.side === 'LONG' ? COLORS.buy : COLORS.sell;
     const sz = order.size || order.quantity || 0;
     const sl = order.stop_loss || 0;
@@ -371,6 +403,24 @@ const PendingOrderCard = ({ order, isExpanded, onToggle }: { order: PendingOrder
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <span style={{ fontFamily: 'monospace', fontSize: '13px', color: COLORS.textPrimary, fontWeight: 600 }}>@${order.entry_price.toFixed(2)}</span>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onCancel(); }}
+                        style={{
+                            padding: '4px 8px',
+                            fontSize: '10px',
+                            fontWeight: 600,
+                            borderRadius: '4px',
+                            border: `1px solid ${COLORS.sell}40`,
+                            background: `${COLORS.sell}15`,
+                            color: COLORS.sell,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                        }}
+                    >
+                        <XCircle size={12} /> Cancel
+                    </button>
                     <span style={{ color: COLORS.textTertiary, fontSize: '14px' }}>{isExpanded ? '▲' : '▼'}</span>
                 </div>
             </div>

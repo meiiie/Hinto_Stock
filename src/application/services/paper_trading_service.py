@@ -143,7 +143,7 @@ class PaperTradingService:
                 if current_price == 0.0:
                     candles = self.market_data_repo.get_latest_candles(pos.symbol, '1m', 1)
                     if candles and len(candles) > 0:
-                        current_price = candles[0].close
+                        current_price = candles[0].close  # SOTA: MarketData now has .close property
             
             # Fallback (Should not happen in prod if data exists)
             if current_price == 0.0:
@@ -550,18 +550,30 @@ class PaperTradingService:
             open_positions=positions
         )
     
-    def get_trade_history(self, page: int = 1, limit: int = 20) -> PaginatedTrades:
+    def get_trade_history(
+        self, page: int = 1, limit: int = 20,
+        symbol: Optional[str] = None,
+        side: Optional[str] = None,
+        pnl_filter: Optional[str] = None
+    ) -> PaginatedTrades:
         """
-        Get paginated trade history.
+        Get paginated trade history with optional filters.
+        
+        SOTA Phase 24c: Server-side filtering support.
         
         Args:
             page: Page number (1-indexed)
             limit: Items per page
+            symbol: Optional filter by symbol
+            side: Optional filter by side ('LONG'/'SHORT')
+            pnl_filter: Optional 'profit' or 'loss' filter
             
         Returns:
             PaginatedTrades with trades and pagination info
         """
-        trades, total = self.repo.get_closed_orders_paginated(page, limit)
+        trades, total = self.repo.get_closed_orders_paginated(
+            page, limit, symbol=symbol, side=side, pnl_filter=pnl_filter
+        )
         total_pages = (total + limit - 1) // limit  # Ceiling division
         
         return PaginatedTrades(

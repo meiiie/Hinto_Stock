@@ -12,6 +12,7 @@ Provides endpoints for:
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import Optional
+from datetime import datetime
 import logging
 
 from src.api.dependencies import get_signal_lifecycle_service, get_realtime_service
@@ -31,10 +32,15 @@ async def get_signal_history(
     days: int = Query(default=7, ge=1, le=90, description="Number of days"),
     page: int = Query(default=1, ge=1, description="Page number"),
     limit: int = Query(default=20, ge=1, le=100, description="Items per page"),
+    # SOTA Phase 25: Server-side filtering for signal analysis
+    symbol: Optional[str] = Query(default=None, description="Filter by symbol (e.g., BTCUSDT)"),
+    signal_type: Optional[str] = Query(default=None, description="Filter by type: buy or sell"),
+    status: Optional[str] = Query(default=None, description="Filter by status: generated, pending, executed, expired"),
+    min_confidence: Optional[float] = Query(default=None, ge=0.0, le=1.0, description="Minimum confidence"),
     lifecycle_service: SignalLifecycleService = Depends(get_signal_lifecycle_service)
 ):
     """
-    Get paginated signal history.
+    Get paginated signal history with optional filters.
     
     Returns all signals generated in the last N days with pagination.
     
@@ -42,20 +48,34 @@ async def get_signal_history(
         days: Number of days to look back (default: 7, max: 90)
         page: Page number (1-indexed)
         limit: Items per page (max: 100)
+        symbol: Filter by trading symbol (optional)
+        signal_type: Filter by buy/sell (optional)
+        status: Filter by signal status (optional)
+        min_confidence: Minimum confidence threshold (optional)
         
     Returns:
         Paginated signal history with signal details
     """
     offset = (page - 1) * limit
     
-    signals = lifecycle_service.get_signal_history(
+    signals = lifecycle_service.get_filtered_signal_history(
         days=days,
         limit=limit,
-        offset=offset
+        offset=offset,
+        symbol=symbol.upper() if symbol else None,
+        signal_type=signal_type.lower() if signal_type else None,
+        status=status.lower() if status else None,
+        min_confidence=min_confidence
     )
     
-    total = lifecycle_service.get_total_count(days=days)
-    total_pages = (total + limit - 1) // limit
+    total = lifecycle_service.get_filtered_count(
+        days=days,
+        symbol=symbol.upper() if symbol else None,
+        signal_type=signal_type.lower() if signal_type else None,
+        status=status.lower() if status else None,
+        min_confidence=min_confidence
+    )
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
     
     return {
         "signals": [s.to_dict() for s in signals],
@@ -86,6 +106,100 @@ async def get_pending_signals(
         "pending_signals": [s.to_dict() for s in signals],
         "count": len(signals)
     }
+
+
+@router.get("/export")
+async def export_signals(
+    days: int = Query(default=30, ge=1, le=90, description="Number of days"),
+    symbol: Optional[str] = Query(default=None, description="Filter by symbol"),
+    signal_type: Optional[str] = Query(default=None, description="Filter by type: buy or sell"),
+    status: Optional[str] = Query(default=None, description="Filter by status"),
+    min_confidence: Optional[float] = Query(default=None, ge=0.0, le=1.0, description="Minimum confidence"),
+    format: str = Query(default="csv", description="Export format: csv or json"),
+    lifecycle_service: SignalLifecycleService = Depends(get_signal_lifecycle_service)
+):
+    """
+    Export filtered signals to CSV or JSON.
+    
+    SOTA Phase 25: Bulk export for signal analysis and research.
+    
+    Args:
+        days: Number of days to export (max: 90)
+        symbol: Filter by symbol (optional)
+        signal_type: Filter by buy/sell (optional)
+        status: Filter by status (optional)
+        min_confidence: Minimum confidence (optional)
+        format: Export format - csv or json
+        
+    Returns:
+        List of signal records for export
+    """
+    from fastapi.responses import Response
+    import csv
+    import io
+    
+    # Get all filtered signals (no pagination limit for export)
+    signals = lifecycle_service.get_filtered_signal_history(
+        days=days,
+        limit=10000,  # Max export limit
+        offset=0,
+        symbol=symbol.upper() if symbol else None,
+        signal_type=signal_type.lower() if signal_type else None,
+        status=status.lower() if status else None,
+        min_confidence=min_confidence
+    )
+    
+    if format.lower() == "json":
+        return {
+            "signals": [s.to_dict() for s in signals],
+            "total": len(signals),
+            "exported_at": datetime.now().isoformat()
+        }
+    
+    # CSV export
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Header row
+    writer.writerow([
+        "ID", "Symbol", "Type", "Status", "Confidence", 
+        "Price", "Entry", "StopLoss", "TP1", "TP2", "TP3",
+        "R:R Ratio", "Generated At", "Executed At",
+        "Order ID", "Indicators", "Reasons"
+    ])
+    
+    # Data rows
+    for s in signals:
+        tp = s.tp_levels or {}
+        writer.writerow([
+            s.id,
+            s.symbol,
+            s.signal_type.value,
+            s.status.value,
+            f"{s.confidence:.2%}",
+            s.price,
+            s.entry_price,
+            s.stop_loss,
+            tp.get('tp1'),
+            tp.get('tp2'),
+            tp.get('tp3'),
+            s.risk_reward_ratio,
+            s.generated_at.isoformat() if s.generated_at else None,
+            s.executed_at.isoformat() if s.executed_at else None,
+            s.order_id,
+            str(s.indicators),
+            "; ".join(s.reasons) if s.reasons else ""
+        ])
+    
+    csv_content = output.getvalue()
+    
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=signals_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        }
+    )
 
 
 @router.get("/{signal_id}")

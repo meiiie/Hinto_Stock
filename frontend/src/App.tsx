@@ -44,7 +44,6 @@ interface SignalLog {
 }
 
 type Tab = 'chart' | 'portfolio' | 'history' | 'performance' | 'settings';
-type BottomTab = 'positions' | 'orders' | 'history';
 
 // Design tokens - using THEME for consistency (Phase C)
 const C = {
@@ -65,8 +64,6 @@ const C = {
 function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('chart');
-  const [bottomTab, setBottomTab] = useState<BottomTab>('positions');
-  const [isBottomPanelHidden, setIsBottomPanelHidden] = useState(false);
 
   // Phase D: Lifted timeframe state for price synchronization
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('15m');
@@ -124,17 +121,50 @@ function App() {
   });
 
   // Fix 2: Clear signal based on state machine transitions (event-driven, not polling)
+
+  // SOTA: Centralized header stats (Balance & Signal Count)
+  const [virtualBalance, setVirtualBalance] = useState<number>(0);
+  const [totalSignals, setTotalSignals] = useState<number>(0);
+
+  // Restore: Clear signal state on transition
   useEffect(() => {
     if (stateChange) {
-      console.log('🔄 State change in App:', stateChange);
       // Clear signal when transitioning to COOLDOWN or SCANNING
       if (stateChange.to_state === 'COOLDOWN' || stateChange.to_state === 'SCANNING') {
-        console.log('🧹 Clearing signal - state changed to:', stateChange.to_state);
         setActiveSignal(null);
         setLastSignalId(null);
       }
     }
   }, [stateChange]);
+
+  useEffect(() => {
+    const fetchHeaderStats = async () => {
+      try {
+        const [pRes, sRes] = await Promise.all([
+          fetch(apiUrl(ENDPOINTS.PORTFOLIO)),
+          fetch(apiUrl(ENDPOINTS.SIGNAL_HISTORY(1, 1, 30)))
+        ]);
+
+        if (pRes.ok) {
+          const pData = await pRes.json();
+          // SOTA FIX: API returns { balance: number, ... } at top level
+          setVirtualBalance(pData.balance !== undefined ? pData.balance : (pData.state?.balance || 0));
+        }
+
+        if (sRes.ok) {
+          const sData = await sRes.json();
+          // Fix: API returns { signals: [], pagination: { total: X } }
+          setTotalSignals(sData.pagination?.total || sData.total || 0);
+        }
+      } catch (error) {
+        console.error('Failed to fetch header stats:', error);
+      }
+    };
+
+    fetchHeaderStats();
+    const interval = setInterval(fetchHeaderStats, 5000); // 5s refresh
+    return () => clearInterval(interval);
+  }, []);
 
   // Convert WebSocket signal to TradingSignal format and update activeSignal
   useEffect(() => {
@@ -301,30 +331,7 @@ function App() {
     }
   }, []);
 
-  // Keyboard shortcut for fullscreen toggle
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && activeTab === 'chart') {
-        setIsBottomPanelHidden(prev => !prev);
-      }
-      if (e.key === 'f' && activeTab === 'chart' && !e.ctrlKey && !e.metaKey) {
-        const target = e.target as HTMLElement;
-        if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
-          setIsBottomPanelHidden(prev => !prev);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab]);
-
-  // Trigger resize when bottom panel is toggled so chart can resize
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      window.dispatchEvent(new Event('resize'));
-    }, 50);
-    return () => clearTimeout(timer);
-  }, [isBottomPanelHidden]);
+  // Bottom panel removed - keyboard shortcuts and resize effects no longer needed
 
   useEffect(() => {
     const fetchStatus = async () => {
@@ -341,9 +348,8 @@ function App() {
         });
 
         const adx = Math.floor(Math.random() * 30) + 20;
-        const trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = marketData && marketData.vwap
-          ? (marketData.close > marketData.vwap ? 'BULLISH' : 'BEARISH')
-          : 'NEUTRAL';
+        // SOTA: Use ref to get current marketData without adding to deps
+        const trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
         setSignalLogs(prev => {
           const newId = Date.now() + Math.random();
           return [...prev.slice(-49), { id: newId, time: timeStr, action: 'SCAN', adx, trend }];
@@ -355,7 +361,7 @@ function App() {
     fetchStatus();
     const interval = setInterval(fetchStatus, 15000);
     return () => clearInterval(interval);
-  }, [marketData]);
+  }, []);  // SOTA: Only poll on interval, not on every WebSocket update
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'chart', label: 'Chart' },
@@ -441,12 +447,14 @@ function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: '10px', textTransform: 'uppercase', fontWeight: 700, color: C.text3 }}>Virtual Balance</div>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: C.up }}>$10,000.00</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: C.up }}>
+              {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(virtualBalance)}
+            </div>
           </div>
           {/* Signal History Count */}
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: '10px', textTransform: 'uppercase', fontWeight: 700, color: C.text3 }}>History</div>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: C.yellow }}>{_signalHistory.length} signals</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: C.yellow }}>{totalSignals} signals</div>
           </div>
           {/* State Machine Indicator */}
           <StateIndicator
@@ -521,26 +529,6 @@ function App() {
                 <span>VWAP: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: C.yellow }}>{marketData?.vwap ? formatPrice(marketData.vwap) : '---'}</span></span>
               </div>
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <button
-                  onClick={() => setIsBottomPanelHidden(!isBottomPanelHidden)}
-                  title={isBottomPanelHidden ? 'Show Panel (Esc)' : 'Fullscreen Chart'}
-                  style={{
-                    padding: '4px 8px',
-                    fontSize: '11px',
-                    fontWeight: 500,
-                    borderRadius: '4px',
-                    border: `1px solid ${C.border}`,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    backgroundColor: isBottomPanelHidden ? C.yellow : 'transparent',
-                    color: isBottomPanelHidden ? '#000' : C.text2,
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  {isBottomPanelHidden ? '⊟' : '⊞'} {isBottomPanelHidden ? 'Exit' : 'Full'}
-                </button>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div style={{
@@ -593,50 +581,7 @@ function App() {
                   </ErrorBoundary>
                 </div>
 
-                {/* Bottom Panel - Collapsible */}
-                {!isBottomPanelHidden && (
-                  <div style={{ height: '176px', flexShrink: 0, display: 'flex', flexDirection: 'column', backgroundColor: C.card, borderTop: `1px solid ${C.border}` }}>
-                    <div style={{ display: 'flex', borderBottom: `1px solid ${C.border}` }}>
-                      {(['positions', 'orders', 'history'] as BottomTab[]).map((tab) => (
-                        <button
-                          key={tab}
-                          onClick={() => setBottomTab(tab)}
-                          style={{
-                            padding: '8px 16px',
-                            fontSize: '12px',
-                            fontWeight: 500,
-                            border: 'none',
-                            cursor: 'pointer',
-                            borderBottom: bottomTab === tab ? `2px solid ${C.yellow}` : '2px solid transparent',
-                            color: bottomTab === tab ? C.text1 : C.text2,
-                            backgroundColor: bottomTab === tab ? C.border : 'transparent',
-                          }}
-                        >
-                          {tab === 'positions' && 'Positions (0)'}
-                          {tab === 'orders' && 'Open Orders (0)'}
-                          {tab === 'history' && 'Trade History'}
-                        </button>
-                      ))}
-                    </div>
-                    <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
-                      <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
-                        <thead>
-                          <tr style={{ color: C.text2, textAlign: 'left' }}>
-                            <th style={{ paddingBottom: '8px', fontWeight: 500 }}>Symbol</th>
-                            <th style={{ paddingBottom: '8px', fontWeight: 500 }}>Size</th>
-                            <th style={{ paddingBottom: '8px', fontWeight: 500 }}>Entry</th>
-                            <th style={{ paddingBottom: '8px', fontWeight: 500 }}>Mark</th>
-                            <th style={{ paddingBottom: '8px', fontWeight: 500 }}>PnL</th>
-                            <th style={{ paddingBottom: '8px', fontWeight: 500 }}>ROE%</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr><td colSpan={6} style={{ padding: '16px 0', textAlign: 'center', color: C.text3 }}>No open positions</td></tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
+                {/* Bottom Panel removed - Use Portfolio tab for positions */}
               </div>
 
               {/* RIGHT SIDEBAR */}
@@ -652,61 +597,7 @@ function App() {
                     onExecute={handleExecuteTrade}
                     onDismiss={() => setActiveSignal(null)}
                   />
-                  {/* Demo button to simulate signal (for testing when no real signals) */}
-                  {!activeSignal && (
-                    <button
-                      onClick={async () => {
-                        try {
-                          const signalType = Math.random() > 0.5 ? 'BUY' : 'SELL';
-                          const response = await fetch(apiUrl(ENDPOINTS.SIMULATE_TRADE), {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ signal_type: signalType })
-                          });
-                          const result = await response.json();
-                          if (result.success) {
-                            const price = result.entry_price || marketData?.close || 91000;
-                            const isBuy = signalType === 'BUY';
-                            setActiveSignal({
-                              id: result.trade_id || Date.now().toString(),
-                              type: signalType,
-                              symbol: selectedSymbol || 'btcusdt',
-                              timestamp: new Date().toISOString(),
-                              entry: price,
-                              stopLoss: result.stop_loss || (isBuy ? price * 0.985 : price * 1.015),
-                              takeProfit1: result.take_profit || (isBuy ? price * 1.015 : price * 0.985),
-                              takeProfit2: isBuy ? price * 1.025 : price * 0.975,
-                              confidence: 75,
-                              rrRatio: 1.5,
-                              strategy: 'Trend Pullback (Simulated)',
-                              indicators: {
-                                rsi: marketData?.rsi || 50,
-                                adx: 32,
-                                stochK: 25,
-                                stochD: 30,
-                              }
-                            });
-                          }
-                        } catch (err) {
-                          console.error('Simulate failed:', err);
-                        }
-                      }}
-                      style={{
-                        marginTop: '8px',
-                        width: '100%',
-                        padding: '8px',
-                        fontSize: '11px',
-                        fontWeight: 500,
-                        borderRadius: '4px',
-                        border: `1px dashed ${C.border}`,
-                        cursor: 'pointer',
-                        backgroundColor: 'transparent',
-                        color: C.text3,
-                      }}
-                    >
-                      🎯 Simulate Signal (Test)
-                    </button>
-                  )}
+                  {/* Simulate button removed - Use Settings > Debug tab instead */}
                 </div>
 
                 {/* Signal Logs */}

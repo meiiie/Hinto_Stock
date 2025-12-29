@@ -31,8 +31,13 @@ class IOrderRepository(ABC):
         pass
     
     @abstractmethod
-    def get_closed_orders_paginated(self, page: int, limit: int) -> Tuple[List[PaperPosition], int]:
-        """Get closed orders with pagination. Returns (orders, total_count)"""
+    def get_closed_orders_paginated(
+        self, page: int, limit: int,
+        symbol: Optional[str] = None,
+        side: Optional[str] = None,
+        pnl_filter: Optional[str] = None
+    ) -> Tuple[List[PaperPosition], int]:
+        """Get closed orders with pagination and optional filters. Returns (orders, total_count)"""
         pass
     
     @abstractmethod

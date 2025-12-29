@@ -10,10 +10,12 @@ Provides:
 - Portfolio status endpoint
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import Optional
 from datetime import datetime
 import logging
+
+logger = logging.getLogger(__name__)
 
 from src.api.dependencies import get_paper_trading_service, get_realtime_service
 from src.application.services.paper_trading_service import PaperTradingService
@@ -31,24 +33,96 @@ logger = logging.getLogger(__name__)
 async def get_trade_history(
     page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
     limit: int = Query(default=20, ge=1, le=100, description="Items per page"),
+    symbol: Optional[str] = Query(default=None, description="Filter by symbol (e.g., BTCUSDT)"),
+    side: Optional[str] = Query(default=None, description="Filter by side (LONG/SHORT)"),
+    pnl_filter: Optional[str] = Query(default=None, description="Filter by P&L: 'profit' or 'loss'"),
     paper_service: PaperTradingService = Depends(get_paper_trading_service)
 ):
     """
-    Get paginated trade history.
+    Get paginated trade history with optional filters.
     
-    **Validates: Requirements 7.1, 7.2**
+    **SOTA Phase 24c: Server-side filtering**
     
-    Returns trades sorted by entry_time descending with pagination info.
+    Returns trades sorted by close_time descending with pagination info.
+    Filters are applied BEFORE pagination for correct results.
     
     Args:
         page: Page number (1-indexed)
         limit: Items per page (max 100)
+        symbol: Filter by trading pair (e.g., BTCUSDT)
+        side: Filter by trade side (LONG or SHORT)
+        pnl_filter: Filter by result ('profit' for P&L > 0, 'loss' for P&L < 0)
         
     Returns:
         Paginated trade history with all required fields
     """
-    result = paper_service.get_trade_history(page=page, limit=limit)
+    result = paper_service.get_trade_history(
+        page=page, limit=limit,
+        symbol=symbol, side=side, pnl_filter=pnl_filter
+    )
     return result.to_dict()
+
+
+@router.get("/export")
+async def export_trades(
+    symbol: Optional[str] = Query(default=None, description="Filter by symbol"),
+    side: Optional[str] = Query(default=None, description="Filter by side (LONG/SHORT)"),
+    pnl_filter: Optional[str] = Query(default=None, description="Filter by P&L"),
+    page_from: int = Query(default=1, ge=1, description="Start page"),
+    page_to: Optional[int] = Query(default=None, description="End page (None = all)"),
+    paper_service: PaperTradingService = Depends(get_paper_trading_service)
+):
+    """
+    Export trades for CSV download.
+    
+    **SOTA Phase 24c: Bulk export with filters**
+    
+    Returns all matching trades for the specified page range.
+    If page_to is None, returns ALL matching trades (for full export).
+    
+    Args:
+        symbol: Filter by trading pair
+        side: Filter by trade side
+        pnl_filter: Filter by result
+        page_from: Starting page
+        page_to: Ending page (None = all pages)
+        
+    Returns:
+        List of all matching trades for export
+    """
+    try:
+        # Get first page to determine total pages
+        first_result = paper_service.get_trade_history(
+            page=1, limit=100,
+            symbol=symbol, side=side, pnl_filter=pnl_filter
+        )
+        
+        total_pages = first_result.total_pages
+        end_page = page_to if page_to else total_pages
+        
+        all_trades = []
+        for page in range(page_from, min(end_page + 1, total_pages + 1)):
+            result = paper_service.get_trade_history(
+                page=page, limit=100,
+                symbol=symbol, side=side, pnl_filter=pnl_filter
+            )
+            for trade in result.trades:
+                all_trades.append(trade.to_dict())
+        
+        return {
+            "trades": all_trades,
+            "total": len(all_trades),
+            "page_from": page_from,
+            "page_to": end_page,
+            "filters": {
+                "symbol": symbol,
+                "side": side,
+                "pnl_filter": pnl_filter
+            }
+        }
+    except Exception as e:
+        logger.error(f"Export trades failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/performance")
@@ -139,17 +213,26 @@ async def close_position(
     Returns:
         Success status
     """
-    # SOTA: For EXECUTION, we still use RealtimeService to get the MOST recent price
-    # However, we should technically get the price for the specific symbol of the position.
-    # Current implementation presumes User is on the chart of the symbol they are closing.
-    # TODO: Fetch position first, then get service for that symbol.
-    # For now, we assume standard usage flow.
+    # SOTA FIX: Use repo.get_order() - the same method close_position_by_id uses internally
+    position = paper_service.repo.get_order(position_id)
+    if not position or position.status != 'OPEN':
+        return {"success": False, "error": "Position not found or not open"}
     
-    latest_candle = service.get_latest_data('1m')
-    current_price = latest_candle.close if latest_candle else 0.0
+    # Get current price for this specific symbol
+    current_price = 0.0
     
+    # 1. Try Market Data Repo (Primary Source - correct symbol pricing)
+    if paper_service.market_data_repo:
+        current_price = paper_service.market_data_repo.get_realtime_price(position.symbol)
+        
+    # 2. Fallback: RealtimeService ONLY if symbols match (avoid cross-contamination)
+    if current_price == 0.0 and service.symbol == position.symbol:
+        latest_candle = service.get_latest_data('1m')
+        current_price = latest_candle.close if latest_candle else 0.0
+        
+    # 3. Final check
     if current_price <= 0:
-        return {"success": False, "error": "Cannot determine current price"}
+        return {"success": False, "error": f"Cannot determine current price for {position.symbol}"}
     
     success = paper_service.close_position_by_id(position_id, current_price, "MANUAL_CLOSE")
     
@@ -188,6 +271,96 @@ async def get_pending_orders(
             }
             for order in pending_orders
         ]
+    }
+
+
+@router.delete("/pending/{order_id}")
+async def cancel_pending_order(
+    order_id: str,
+    paper_service: PaperTradingService = Depends(get_paper_trading_service)
+):
+    """
+    Cancel a single pending order.
+    
+    SOTA: Removes the pending order from the system without executing.
+    
+    Args:
+        order_id: ID of the pending order to cancel
+        
+    Returns:
+        Success status and cancelled order details
+    """
+    # Find the pending order
+    pending_orders = paper_service.repo.get_pending_orders()
+    target_order = None
+    
+    for order in pending_orders:
+        if order.id == order_id:
+            target_order = order
+            break
+    
+    if not target_order:
+        raise HTTPException(status_code=404, detail=f"Pending order not found: {order_id}")
+    
+    # Mark as CANCELLED (or delete from DB)
+    target_order.status = 'CANCELLED'
+    target_order.exit_reason = 'USER_CANCELLED'
+    paper_service.repo.update_order(target_order)
+    
+    # Refund margin to balance
+    current_balance = paper_service.repo.get_account_balance()
+    paper_service.repo.update_account_balance(current_balance + target_order.margin)
+    
+    logger.info(f"🚫 CANCELLED pending order: {target_order.side} {target_order.symbol} @ {target_order.entry_price:.2f}")
+    
+    return {
+        "success": True,
+        "message": "Pending order cancelled",
+        "order_id": order_id,
+        "symbol": target_order.symbol,
+        "side": target_order.side,
+        "refunded_margin": target_order.margin
+    }
+
+
+@router.delete("/pending")
+async def cancel_all_pending_orders(
+    paper_service: PaperTradingService = Depends(get_paper_trading_service)
+):
+    """
+    Cancel all pending orders at once.
+    
+    SOTA: Bulk cancel for portfolio cleanup.
+    
+    Returns:
+        Number of orders cancelled and total refunded margin
+    """
+    pending_orders = paper_service.repo.get_pending_orders()
+    
+    if not pending_orders:
+        return {"success": True, "message": "No pending orders to cancel", "count": 0}
+    
+    total_refund = 0.0
+    cancelled_count = 0
+    
+    for order in pending_orders:
+        order.status = 'CANCELLED'
+        order.exit_reason = 'USER_CANCELLED_ALL'
+        paper_service.repo.update_order(order)
+        total_refund += order.margin
+        cancelled_count += 1
+    
+    # Refund all margin at once
+    current_balance = paper_service.repo.get_account_balance()
+    paper_service.repo.update_account_balance(current_balance + total_refund)
+    
+    logger.info(f"🚫 CANCELLED ALL {cancelled_count} pending orders, refunded ${total_refund:.2f}")
+    
+    return {
+        "success": True,
+        "message": f"Cancelled {cancelled_count} pending orders",
+        "count": cancelled_count,
+        "refunded_margin": total_refund
     }
 
 

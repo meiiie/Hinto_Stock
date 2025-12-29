@@ -298,19 +298,40 @@ async def get_supported_symbols():
     """
     Get list of supported trading symbols.
     
-    Returns all symbols that are actively being monitored.
+    SOTA Single Source of Truth: Uses same data source as /settings/tokens
+    to ensure frontend dropdown matches Settings watchlist exactly.
+    
     Frontend uses this to populate the token selector dropdown.
     
     Returns:
         List of symbol info with name and base currency
     """
-    from src.config import MultiTokenConfig
+    from src.config import DEFAULT_SYMBOLS
+    from src.api.dependencies import get_paper_trading_service
     
-    config = MultiTokenConfig()
+    # SOTA: Use same data source as /settings/tokens
+    paper_service = get_paper_trading_service()
+    settings = paper_service.repo.get_all_settings()
+    
+    # Get enabled tokens (same logic as /settings/tokens)
+    enabled_tokens_str = settings.get('enabled_tokens', '')
+    if enabled_tokens_str:
+        enabled_tokens = set(enabled_tokens_str.split(','))
+    else:
+        enabled_tokens = set(DEFAULT_SYMBOLS)
+    
+    # Get custom tokens
+    custom_tokens_str = settings.get('custom_tokens', '')
+    custom_tokens = set(custom_tokens_str.split(',')) if custom_tokens_str else set()
+    custom_tokens.discard('')  # Remove empty string
+    
+    # Combine: All default + custom that are enabled
+    all_symbols = list(DEFAULT_SYMBOLS) + sorted(s for s in custom_tokens if s not in DEFAULT_SYMBOLS)
+    active_symbols = [s for s in all_symbols if s in enabled_tokens]
     
     # Map symbols to displayable info
     symbol_info = []
-    for symbol in config.symbols:
+    for symbol in active_symbols:
         base = symbol.replace("USDT", "")
         symbol_info.append({
             "symbol": symbol.lower(),
@@ -323,12 +344,13 @@ async def get_supported_symbols():
     return {
         "symbols": symbol_info,
         "count": len(symbol_info),
-        "default": config.symbols[0].lower() if config.symbols else "btcusdt"
+        "default": active_symbols[0].lower() if active_symbols else "btcusdt"
     }
 
 
 def _get_token_name(base: str) -> str:
     """Get full name for token base currency."""
+    # SOTA: Extended token name mapping
     names = {
         "BTC": "Bitcoin",
         "ETH": "Ethereum",
@@ -340,5 +362,22 @@ def _get_token_name(base: str) -> str:
         "XRP": "Ripple",
         "ADA": "Cardano",
         "DOGE": "Dogecoin",
+        "SOMI": "SOMI",
+        "XLM": "Stellar",
+        "LINK": "Chainlink",
+        "DOT": "Polkadot",
+        "AVAX": "Avalanche",
+        "MATIC": "Polygon",
+        "NEAR": "NEAR Protocol",
+        "ATOM": "Cosmos",
+        "UNI": "Uniswap",
+        "LTC": "Litecoin",
+        "TRX": "TRON",
+        "SHIB": "Shiba Inu",
+        "APT": "Aptos",
+        "ARB": "Arbitrum",
+        "OP": "Optimism",
+        "SUI": "Sui",
+        "SEI": "Sei",
     }
     return names.get(base, base)

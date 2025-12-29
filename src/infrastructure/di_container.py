@@ -591,7 +591,10 @@ class DIContainer:
             from ..application.services.signal_lifecycle_service import SignalLifecycleService
             from ..infrastructure.repositories.sqlite_signal_repository import SQLiteSignalRepository
             
-            signal_repository = SQLiteSignalRepository()
+            # SOTA FIX: Unify DB to trading_system.db
+            db_path = self.get_config('DATABASE_PATH', 'data/trading_system.db')
+            signal_repository = SQLiteSignalRepository(db_path=db_path)
+            
             self._instances['signal_lifecycle_service'] = SignalLifecycleService(
                 signal_repository=signal_repository
             )
