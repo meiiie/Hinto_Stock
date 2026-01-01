@@ -1,6 +1,6 @@
 # SHARED BOARD - Inter-Agent Collaboration Space
 
-Version: 1.2 | Updated: 2025-12-27
+Version: 1.3 | Updated: 2025-12-29
 
 This is the central shared memory for all AI agents. Update this file when:
 - Making decisions that affect other agents
@@ -12,21 +12,22 @@ This is the central shared memory for all AI agents. Update this file when:
 
 ## CURRENT SPRINT STATUS
 
-Phase: SOTA Strategy Config ✅
+Phase: Layer 1 Complete ✅ → Algorithm Improvement Prep 🔄
 Sprint: 2025-W52
-Focus: Signal Generation + Trade Execution Flow - COMPLETE
+Focus: Chart UI Polish + Algorithm Enhancement Preparation
 
 ### Active Work
 
 | Agent | Current Task | Status | Blockers | Last Updated |
 |-------|--------------|--------|----------|--------------|
 | PM | System setup | Complete | None | 2025-12-22 |
-| FE | Execute button fix | ✅ Complete | None | 2025-12-22 |
-| BE | **SOTA Strategy Config** | **✅ Complete** | None | **2025-12-27** |
-| BE | **Signal Flow Fix** | **✅ Complete** | None | **2025-12-27** |
+| FE | Chart UI Improvements | ✅ Complete | None | 2025-12-29 |
+| FE | BBFillPlugin custom component | ✅ Complete | None | 2025-12-29 |
+| BE | SOTA Strategy Config | ✅ Complete | None | 2025-12-27 |
+| BE | Signal Flow Fix | ✅ Complete | None | 2025-12-27 |
 | DB | Codebase audit | Complete | None | 2025-12-22 |
 | QA | Codebase audit | Complete | None | 2025-12-22 |
-| QS | Initial setup | ✅ Ready | None | 2025-12-23 |
+| QS | **Volume Upgrade (Delta + Liquidity)** | **✅ Complete** | None | **2025-12-31** |
 
 
 ---
@@ -41,7 +42,7 @@ Layers: API / Application / Domain / Infrastructure
 Key Components:
 - FastAPI app with WebSocket support
 - RealtimeService (1000+ lines) - Main orchestrator
-- 8 Indicators: VWAP, BB, StochRSI, ADX, ATR, SwingPoint, VolumeSpike, TaLib
+- 10+ Indicators: VWAP, BB, StochRSI, ADX, ATR, VolumeDelta, LiquidityZones...
 - Paper Trading Service
 - State Machine (BOOTSTRAP/SCANNING/POSITION_OPEN)
 - EventBus for async communication
@@ -49,14 +50,17 @@ Key Components:
 
 ### Frontend (frontend/)
 ```
-STATUS: IMPLEMENTED - Trading Dashboard
+STATUS: IMPLEMENTED - Professional Trading Dashboard
 Stack: React 19 + Vite 7 + TailwindCSS 4 + Tauri 2
 
 Key Components:
-- CandleChart (977 lines) - Lightweight Charts with VWAP/BB overlays
+- CandleChart (1300+ lines) - Lightweight Charts with VWAP/BB overlays
+- BBFillPlugin (250 lines) - Custom plugin for BB band fill between lines
 - useMarketData hook - WebSocket with exponential backoff
+- Zustand store - Multi-symbol data management
 - 10 trading components: Portfolio, Settings, TradeHistory, SignalCard...
-- Binance-style dark theme
+- Binance-style dark theme (#181A20 background)
+- Vietnamese timezone display (UTC+7) with Binance format
 ```
 
 ---
@@ -86,6 +90,18 @@ Decision:
 - Regime penalty mode (replace hard block)
 - ConfluenceScorer for weighted signal scoring (60% threshold)
 - PaperTradingService injection into RealtimeService for signal→trade flow
+Status: Implemented
+
+### [DECISION-004] Chart UI Improvements & BB Fill Plugin
+Date: 2025-12-29
+Made By: FE + Human Owner
+Affects: FE, Chart Display
+Decision: 
+- Created custom BBFillPlugin for lightweight-charts (polygon fill between BB bands)
+- Updated chart background to Binance color (#181A20)
+- Vietnamese timezone display with Binance format (T2 29 Thg 12 '25 17:00)
+- Added data deduplication for all chart series to fix duplicate timestamp errors
+- Colors: BB #1F7DC8, VWAP #FB6C01, BB Fill rgba(31,125,200,0.1)
 Status: Implemented
 
 ---

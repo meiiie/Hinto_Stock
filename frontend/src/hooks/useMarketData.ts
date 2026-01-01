@@ -285,6 +285,8 @@ export const useMarketData = (symbol: string = 'btcusdt'): UseMarketDataReturn =
                             vwap: parsedData.vwap || parsedData.data?.vwap,
                             bollinger: parsedData.bollinger || parsedData.data?.bollinger,
                             rsi: parsedData.rsi || parsedData.data?.rsi,
+                            liquidity_zones: parsedData.liquidity_zones || parsedData.data?.liquidity_zones,
+                            sfp: parsedData.sfp || parsedData.data?.sfp,
                         };
                         setData(marketData);
                         lastUpdateTimeRef.current = marketData.timestamp; // Track last update

@@ -35,6 +35,13 @@ class ConfidenceLevel(Enum):
     LOW = "low"        # < 65%
 
 
+class SignalPriority(Enum):
+    """Signal priority levels"""
+    HIGH = "high"      # Immediate action (SFP, Breakout)
+    MEDIUM = "medium"  # Normal action (Pullback)
+    LOW = "low"        # Low confidence
+
+
 @dataclass
 class TradingSignal:
     """
@@ -42,6 +49,7 @@ class TradingSignal:
     
     Core Attributes:
         signal_type: Type of signal (BUY, SELL, NEUTRAL)
+        priority: Signal priority (HIGH, MEDIUM, LOW)
         confidence: Confidence level (0.0 to 1.0)
         price: Price at signal generation
         indicators: Dict of indicator values
@@ -69,11 +77,13 @@ class TradingSignal:
     signal_type: SignalType
     confidence: float
     price: float
+    priority: SignalPriority = field(default=SignalPriority.MEDIUM) # Default to Medium
     indicators: Dict[str, Any] = field(default_factory=dict)
     reasons: List[str] = field(default_factory=list)
     
-    # Trade fields
+    # Trade Attributes
     entry_price: Optional[float] = None
+    is_limit_order: bool = False # SOTA: Support Limit Orders
     tp_levels: Optional[Dict[str, float]] = None  # {'tp1': price, 'tp2': price, 'tp3': price}
     stop_loss: Optional[float] = None
     position_size: Optional[float] = None
@@ -154,6 +164,7 @@ class TradingSignal:
             "id": self.id,
             "symbol": self.symbol,  # SOTA FIX: Include symbol in JSON
             "signal_type": self.signal_type.value,
+            "priority": self.priority.value,
             "status": self.status.value,
             "confidence": self.confidence,
             "confidence_level": self.confidence_level.value,

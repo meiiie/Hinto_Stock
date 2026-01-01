@@ -56,6 +56,10 @@ class PaperTradingService:
     Simulates Futures trading with Leverage (Default 1x).
     """
     
+    # Cooldown durations
+    DEFAULT_COOLDOWN_SECONDS = 300  # 5 minutes for normal exits
+    REVERSAL_COOLDOWN_SECONDS = 600  # 10 minutes after SIGNAL_REVERSAL
+    
     def __init__(self, repository: IOrderRepository, market_data_repository: Optional[SQLiteMarketDataRepository] = None):
         self.repo = repository
         self.market_data_repo = market_data_repository
@@ -63,9 +67,10 @@ class PaperTradingService:
         self.RISK_PER_TRADE = 0.015  # 1.5% risk per trade (Tuned)
         self.LEVERAGE = 1
         
-        # SOTA FIX: Signal cooldown after closing a position
-        self.COOLDOWN_SECONDS = 300  # 5 minutes
-        self._last_trade_close_time: Optional[datetime] = None
+        # CRITICAL FIX: Per-symbol cooldowns (instead of global)
+        # This allows trades on ETHUSDT while BTCUSDT is in cooldown
+        self._cooldowns: Dict[str, datetime] = {}
+        self._cooldown_durations: Dict[str, int] = {}  # Store duration per symbol
         
         # SOTA FIX: Allow position flip (close + open opposite)
         self.ALLOW_FLIP = True
@@ -199,16 +204,21 @@ class PaperTradingService:
         """
         Handle new trading signal.
         
-        SOTA FIX:
-        - Added cooldown check after closing position
+        CRITICAL FIX:
+        - Per-symbol cooldown check (was global)
+        - Longer cooldown after SIGNAL_REVERSAL (10 min vs 5 min)
         - Allow position flip (close + open opposite direction)
         """
-        # SOTA FIX: Check cooldown after last trade close
-        if self._last_trade_close_time:
-            time_since_close = (datetime.now() - self._last_trade_close_time).total_seconds()
-            if time_since_close < self.COOLDOWN_SECONDS:
-                remaining = int(self.COOLDOWN_SECONDS - time_since_close)
-                logger.info(f"⏸️ COOLDOWN: {remaining}s remaining. Signal ignored.")
+        # CRITICAL FIX: Per-symbol cooldown check
+        symbol_key = symbol.lower()
+        if symbol_key in self._cooldowns:
+            cooldown_duration = self._cooldown_durations.get(
+                symbol_key, self.DEFAULT_COOLDOWN_SECONDS
+            )
+            time_since_close = (datetime.now() - self._cooldowns[symbol_key]).total_seconds()
+            if time_since_close < cooldown_duration:
+                remaining = int(cooldown_duration - time_since_close)
+                logger.info(f"⏸️ COOLDOWN {symbol}: {remaining}s remaining. Signal ignored.")
                 return
         
         # 0. Zombie Killer: Cancel existing PENDING orders for this symbol
@@ -230,7 +240,11 @@ class PaperTradingService:
                    (pos.side == 'SHORT' and signal.signal_type == SignalType.BUY):
                     logger.info(f"🔄 REVERSAL SIGNAL: Closing {pos.side} position.")
                     self.close_position(pos, signal.price, "SIGNAL_REVERSAL")
-                    self._last_trade_close_time = datetime.now()
+                    
+                    # CRITICAL FIX: Set per-symbol cooldown with LONGER duration for reversals
+                    self._cooldowns[symbol_key] = datetime.now()
+                    self._cooldown_durations[symbol_key] = self.REVERSAL_COOLDOWN_SECONDS
+                    logger.info(f"⏰ Set {symbol} cooldown: {self.REVERSAL_COOLDOWN_SECONDS}s (REVERSAL)")
                     
                     # SOTA FIX: If ALLOW_FLIP, continue to open new position
                     if not self.ALLOW_FLIP:
@@ -307,7 +321,11 @@ class PaperTradingService:
         logger.info(f"⏳ PENDING {position.side} {position.symbol} @ {position.entry_price:.2f} | Size: ${position_size_usd:.2f}")
 
     def close_position(self, position: PaperPosition, exit_price: float, reason: str) -> None:
-        """Close a position and update Wallet Balance"""
+        """
+        Close a position and update Wallet Balance.
+        
+        CRITICAL FIX: Sets per-symbol cooldown based on exit reason.
+        """
         pnl = position.calculate_unrealized_pnl(exit_price)
         
         position.status = 'CLOSED'
@@ -322,7 +340,20 @@ class PaperTradingService:
         current_balance = self.repo.get_account_balance()
         self.repo.update_account_balance(current_balance + pnl)
         
-        logger.info(f"💰 CLOSED {position.side} | PnL: ${pnl:.2f} | Reason: {reason}")
+        # CRITICAL FIX: Set per-symbol cooldown based on exit reason
+        symbol_key = position.symbol.lower()
+        self._cooldowns[symbol_key] = datetime.now()
+        
+        # Longer cooldown for reversals (indicates ranging market)
+        if reason == "SIGNAL_REVERSAL":
+            self._cooldown_durations[symbol_key] = self.REVERSAL_COOLDOWN_SECONDS
+        else:
+            self._cooldown_durations[symbol_key] = self.DEFAULT_COOLDOWN_SECONDS
+        
+        logger.info(
+            f"💰 CLOSED {position.side} | PnL: ${pnl:.2f} | Reason: {reason} | "
+            f"Cooldown: {self._cooldown_durations.get(symbol_key, 300)}s"
+        )
 
     def close_position_by_id(self, position_id: str, current_price: float, reason: str = "MANUAL_CLOSE") -> bool:
         """Close a position by its ID"""

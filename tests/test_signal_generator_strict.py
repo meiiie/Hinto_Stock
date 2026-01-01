@@ -130,18 +130,18 @@ class TestSignalGeneratorStrictMode:
             use_filters=use_filters
         )
 
-    def test_strict_mode_enabled_by_default(self):
-        """Test strict mode is enabled by default"""
+    def test_strict_mode_disabled_by_default(self):
+        """Test strict mode is disabled by default (SOTA flexible)"""
         # Note: We must pass required args, so we check default of strict_mode arg if not passed?
         # Actually, we can't test default arg value easily if we must pass required args.
-        # We'll just check if we pass nothing for strict_mode, it defaults to True.
+        # We'll just check if we pass nothing for strict_mode, it defaults to False.
         generator = SignalGenerator(
             vwap_calculator=self.vwap_calculator,
             bollinger_calculator=self.bollinger_calculator,
             stoch_rsi_calculator=self.stoch_rsi_calculator,
             smart_entry_calculator=self.smart_entry_calculator
         )
-        assert generator.strict_mode is True
+        assert generator.strict_mode is False
     
     def test_strict_mode_can_be_disabled(self):
         """Test strict mode can be disabled for backward compatibility"""
@@ -181,7 +181,7 @@ class TestSignalGeneratorStrictMode:
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=27.0, trend='bullish')
         
         generator_strict = self._create_generator(strict_mode=True, use_filters=False)
-        signal_strict = generator_strict.generate_signal(candles)
+        signal_strict = generator_strict.generate_signal(candles, symbol='BTCUSDT')
         
         # Should NOT generate BUY signal (RSI 27 > 25)
         if signal_strict:
@@ -193,7 +193,7 @@ class TestSignalGeneratorStrictMode:
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=20.0, trend='bullish')
         
         generator_strict = self._create_generator(strict_mode=True, use_filters=False)
-        signal_strict = generator_strict.generate_signal(candles)
+        signal_strict = generator_strict.generate_signal(candles, symbol='BTCUSDT')
         
         # May generate BUY signal if other conditions met
         # Just verify it doesn't crash and RSI is checked
@@ -205,7 +205,7 @@ class TestSignalGeneratorStrictMode:
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=72.0, trend='bearish')
         
         generator_strict = self._create_generator(strict_mode=True, use_filters=False)
-        signal_strict = generator_strict.generate_signal(candles)
+        signal_strict = generator_strict.generate_signal(candles, symbol='BTCUSDT')
         
         # Should NOT generate SELL signal (RSI 72 < 75)
         if signal_strict:
@@ -217,7 +217,7 @@ class TestSignalGeneratorStrictMode:
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=80.0, trend='bearish')
         
         generator_strict = self._create_generator(strict_mode=True, use_filters=False)
-        signal_strict = generator_strict.generate_signal(candles)
+        signal_strict = generator_strict.generate_signal(candles, symbol='BTCUSDT')
         
         # May generate SELL signal if other conditions met
         # Just verify it doesn't crash and RSI is checked
@@ -228,7 +228,7 @@ class TestSignalGeneratorStrictMode:
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=20.0, trend='bullish')
         
         generator = self._create_generator(strict_mode=True, use_filters=False)
-        signal = generator.generate_signal(candles)
+        signal = generator.generate_signal(candles, symbol='BTCUSDT')
         
         # If signal generated, should have 3+ conditions
         if signal and signal.signal_type == SignalType.BUY:
@@ -240,7 +240,7 @@ class TestSignalGeneratorStrictMode:
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=28.0, trend='bullish')
         
         generator = self._create_generator(strict_mode=False, use_filters=False)
-        signal = generator.generate_signal(candles)
+        signal = generator.generate_signal(candles, symbol='BTCUSDT')
         
         # If signal generated, should have 2+ conditions
         if signal and signal.signal_type == SignalType.BUY:
@@ -252,7 +252,7 @@ class TestSignalGeneratorStrictMode:
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=20.0, trend='bullish')
         
         generator = self._create_generator(strict_mode=True, use_filters=False)
-        signal = generator.generate_signal(candles)
+        signal = generator.generate_signal(candles, symbol='BTCUSDT')
         
         # Check that EMA(25) is mentioned in reasons if signal generated
         if signal and signal.signal_type == SignalType.BUY:
@@ -267,7 +267,7 @@ class TestSignalGeneratorStrictMode:
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=28.0, trend='bullish')
         
         generator = self._create_generator(strict_mode=False, use_filters=False)
-        signal = generator.generate_signal(candles)
+        signal = generator.generate_signal(candles, symbol='BTCUSDT')
         
         # Check that EMA(7) is mentioned in reasons if signal generated
         if signal and signal.signal_type == SignalType.BUY:
@@ -281,7 +281,7 @@ class TestSignalGeneratorStrictMode:
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=20.0, trend='bullish')
         
         generator = self._create_generator(strict_mode=True, use_filters=True)
-        signal = generator.generate_signal(candles)
+        signal = generator.generate_signal(candles, symbol='BTCUSDT')
         
         # Should not crash with both strict mode and filters enabled
         assert signal is not None
@@ -294,8 +294,8 @@ class TestSignalGeneratorStrictMode:
         generator_normal = self._create_generator(strict_mode=False, use_filters=False)
         generator_strict = self._create_generator(strict_mode=True, use_filters=False)
         
-        signal_normal = generator_normal.generate_signal(candles)
-        signal_strict = generator_strict.generate_signal(candles)
+        signal_normal = generator_normal.generate_signal(candles, symbol='BTCUSDT')
+        signal_strict = generator_strict.generate_signal(candles, symbol='BTCUSDT')
         
         # Normal mode might generate signal where strict mode doesn't
         # (RSI 28 passes normal <30 but fails strict <25)
@@ -306,7 +306,7 @@ class TestSignalGeneratorStrictMode:
         candles = create_test_candles_with_rsi(count=100, final_rsi_target=20.0, trend='bullish')
         
         generator = self._create_generator(strict_mode=True, use_filters=False)
-        signal = generator.generate_signal(candles)
+        signal = generator.generate_signal(candles, symbol='BTCUSDT')
         
         if signal and signal.signal_type == SignalType.BUY:
             reasons_text = ' '.join(signal.reasons)
@@ -335,7 +335,7 @@ class TestSignalGeneratorStrictMode:
         candles[-1] = new_last_candle
         
         generator = self._create_generator(strict_mode=False, use_filters=False)
-        signal = generator.generate_signal(candles)
+        signal = generator.generate_signal(candles, symbol='BTCUSDT')
         
         # Should be rejected due to Volume Climax
         if signal:
@@ -367,7 +367,7 @@ class TestSignalGeneratorStrictMode:
         candles[-1] = new_last_candle
         
         generator = self._create_generator(strict_mode=True, use_filters=False)
-        signal = generator.generate_signal(candles)
+        signal = generator.generate_signal(candles, symbol='BTCUSDT')
         
         # Should NOT be rejected by Volume Climax
         # (It might be rejected by other things in this mock setup, but let's check reasons if it exists)

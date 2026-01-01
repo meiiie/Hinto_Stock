@@ -1,7 +1,7 @@
 # 🌐 GLOBAL ARCHITECTURE - Hinto Stock Trading System
 
-**Document Version:** 1.0
-**Last Updated:** 2025-12-22
+**Document Version:** 1.1
+**Last Updated:** 2025-12-29
 **Maintainer:** Project Manager AI
 
 ---
@@ -57,10 +57,11 @@ AND StochRSI crosses above 20 (Momentum shift)
 AND Volume > Previous Red Candle Volume (Buying pressure)
 ```
 
-### Layer 2: Candle Confirmation
-- Bullish Engulfing patterns
-- Pin Bar / Hammer detection
-- Inside Bar Breakout
+### Layer 2: Institutional Confirmation (SOTA)
+- **SFP Detector:** Swing Failure Pattern detection (Zero Lag Entry)
+- **Volume Delta:** Order Flow approximation (Buy/Sell Pressure)
+- **Momentum Velocity:** FOMO Filter (Blocks signals if price moves too fast)
+- **Liquidity Zones:** Stop Hunt Protection (Smart SL placement)
 
 ### Layer 3: LLM Strategic Planning
 - Market regime analysis
@@ -269,25 +270,27 @@ Frontend  Backend  Database    QA
 
 | Metric | Target | Rationale |
 |--------|--------|-----------|
-| Win Rate | > 55% | Trend following baseline |
-| Risk/Reward | > 1:1.5 | Profit > Risk per trade |
-| Max Drawdown | < 15% | Capital preservation |
-| Profit Factor | > 1.5 | Gross Profit / Gross Loss |
-| Latency | < 100ms | Signal to UI update |
+| Win Rate | > 70% | Improved via SFP & Volume Delta |
+| Risk/Reward | > 1:2.0 | Optimized via Liquidity Zones |
+| Max Drawdown | < 10% | Protected by Velocity Filter |
+| Profit Factor | > 2.0 | Gross Profit / Gross Loss |
+| Latency | < 50ms | SFP Zero Lag Entry |
 
 ---
 
 ## 8. CURRENT STATUS
 
-**Phase:** 🔄 Restructuring (Layer 1 Focus)
+**Phase:** ✅ Layer 1 Complete → 🔄 Algorithm Improvement
 
 | Component | Status | Owner |
 |-----------|--------|-------|
-| Layer 1 Core | 🟡 In Progress | Backend |
-| UI Dashboard | 🟡 In Progress | Frontend |
-| Signal Display | 🔴 Needs Work | Frontend |
+| Layer 1 Core | 🟢 Complete | Backend |
+| UI Dashboard | 🟢 Complete | Frontend |
+| Chart Display | 🟢 Complete (BBFillPlugin) | Frontend |
+| Signal Display | 🟢 Complete | Frontend |
 | Database | 🟢 Stable | Database |
 | Testing | 🟡 Partial | QA |
+| **Algorithm Improvement** | **🔄 Next Phase** | **Quant Specialist** |
 
 ---
 
@@ -296,6 +299,7 @@ Frontend  Backend  Database    QA
 | Date | Change | Author |
 |------|--------|--------|
 | 2025-12-22 | Initial architecture document | Project Manager AI |
+| 2025-12-29 | Updated status: Layer 1 Complete, Algorithm phase next | AI Assistant |
 
 ---
 

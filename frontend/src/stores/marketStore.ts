@@ -19,6 +19,29 @@ import { subscribeWithSelector } from 'zustand/middleware';
 // Types
 // ============================================================================
 
+export interface LiquidityZone {
+    zone_low: number;
+    zone_high: number;
+    zone_type: string;
+    strength: number;
+    touch_count: number;
+}
+
+export interface LiquidityZonesResult {
+    stop_loss_clusters: LiquidityZone[];
+    take_profit_zones: LiquidityZone[];
+    breakout_zones: LiquidityZone[];
+}
+
+export interface SFPResult {
+    type: string; // 'bullish', 'bearish', 'none'
+    swing_price: number;
+    penetration_pct: number;
+    rejection_strength: number;
+    volume_ratio: number;
+    confidence: number;
+}
+
 export interface MarketData {
     open: number;
     high: number;
@@ -34,6 +57,13 @@ export interface MarketData {
         upper_band: number;
         lower_band: number;
         middle_band: number;
+    };
+    liquidity_zones?: LiquidityZonesResult;
+    sfp?: SFPResult;
+    velocity?: {
+        value: number;
+        is_fomo: boolean;
+        is_crash: boolean;
     };
 }
 

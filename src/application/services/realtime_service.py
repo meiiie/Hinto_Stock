@@ -82,7 +82,9 @@ class RealtimeService:
         # SOTA FIX: Signal lifecycle service for persistence
         lifecycle_service: Optional['SignalLifecycleService'] = None,  # SignalLifecycleService (avoid circular import)
         # SOTA FIX: TrendFilter for HTF Confluence
-        trend_filter: Optional[TrendFilter] = None
+        trend_filter: Optional[TrendFilter] = None,
+        # CRITICAL FIX: SignalConfirmationService for whipsaw prevention
+        signal_confirmation_service: Optional['SignalConfirmationService'] = None
     ):
         """
         Initialize real-time service with dependency injection.
@@ -146,6 +148,9 @@ class RealtimeService:
 
         # SOTA FIX: TrendFilter for HTF Confluence
         self.trend_filter = trend_filter
+        
+        # CRITICAL FIX: SignalConfirmationService for whipsaw prevention
+        self._signal_confirmation_service = signal_confirmation_service
         
         # Data storage (in-memory cache)
         self._latest_1m: Optional[Candle] = None
@@ -811,6 +816,24 @@ class RealtimeService:
             )
             
             if signal and signal.signal_type.value != 'neutral':
+                # CRITICAL FIX: Use SignalConfirmationService to prevent whipsaw
+                # Requires 2 consecutive signals in same direction
+                if self._signal_confirmation_service:
+                    confirmed_signal = self._signal_confirmation_service.process_signal(
+                        self.symbol, signal
+                    )
+                    
+                    if not confirmed_signal:
+                        # Signal pending confirmation - don't execute yet
+                        self.logger.debug(
+                            f"📋 Signal {signal.signal_type.value} pending confirmation"
+                        )
+                        return
+                    
+                    # Use confirmed signal (may have better entry price)
+                    signal = confirmed_signal
+                    self.logger.info(f"🎯 CONFIRMED signal executing: {signal.signal_type.value}")
+                
                 self._latest_signal = signal
                 self.logger.info(f"Signal generated: {signal}")
                 
@@ -1091,7 +1114,44 @@ class RealtimeService:
                 else:
                     # Debug logging if StochRSI is missing
                     self.logger.warning(f"StochRSI failed for {timeframe}. Candles: {len(candles)}. Min req: {self.stoch_rsi_calculator.rsi_period + self.stoch_rsi_calculator.stoch_period + self.stoch_rsi_calculator.k_period + self.stoch_rsi_calculator.d_period}")
-                    
+                
+                # 3. Liquidity Zones (Volume Upgrade)
+                if self.signal_generator.liquidity_zone_detector:
+                    try:
+                        # Use same logic as SignalGenerator to get latest zones
+                        atr_val = latest.get('atr')
+                        zones_result = self.signal_generator.liquidity_zone_detector.detect_zones(
+                            candles, 
+                            current_price=latest['close'], 
+                            atr_value=atr_val
+                        )
+                        if zones_result:
+                            latest['liquidity_zones'] = zones_result.to_dict()
+                    except Exception as e:
+                        self.logger.warning(f"Failed to get liquidity zones: {e}")
+
+                # 4. SFP (SOTA)
+                if self.signal_generator.sfp_detector:
+                    try:
+                        sfp_result = self.signal_generator.sfp_detector.detect(candles)
+                        if sfp_result.is_valid:
+                            latest['sfp'] = sfp_result.to_dict()
+                    except Exception as e:
+                        self.logger.warning(f"Failed to get SFP: {e}")
+
+                # 5. Momentum Velocity (SOTA)
+                if self.signal_generator.momentum_velocity_calculator:
+                    try:
+                        velocity_res = self.signal_generator.momentum_velocity_calculator.calculate(candles)
+                        if velocity_res:
+                            latest['velocity'] = {
+                                'value': float(velocity_res.velocity),
+                                'is_fomo': bool(velocity_res.is_fomo_spike),
+                                'is_crash': bool(velocity_res.is_crash_drop)
+                            }
+                    except Exception as e:
+                        self.logger.warning(f"Failed to get Velocity: {e}")
+
                 return {k: (v if pd.notna(v) else 0.0) for k, v in latest.items()}
             return {}
         except Exception as e:

@@ -14,6 +14,7 @@ import {
     SeriesMarker
 } from 'lightweight-charts';
 import { BBFillPlugin } from './BBFillPlugin';
+import { LiquidityZonePlugin, ZoneData } from './LiquidityZonePlugin';
 // SOTA: Use Zustand store for multi-symbol data
 import {
     useActiveData1m,
@@ -71,6 +72,7 @@ interface ChartData {
 
 interface Signal {
     type: 'BUY' | 'SELL';
+    priority?: string; // 'high' | 'medium' | 'low'
     price: number;
     entry_price: number;
     stop_loss: number;
@@ -172,7 +174,8 @@ const CandleChart: React.FC<CandleChartProps> = ({
     const vwapSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
     const bbUpperSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
     const bbLowerSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-    const bbFillPluginRef = useRef<BBFillPlugin | null>(null);  // Custom BB fill plugin
+    const bbFillPluginRef = useRef<BBFillPlugin | null>(null);
+    const liquidityZonePluginRef = useRef<LiquidityZonePlugin | null>(null);
 
     // Dynamic Price Lines for Open Positions (using createPriceLine API)
     const entryPriceLineRef = useRef<IPriceLine | null>(null);
@@ -240,13 +243,17 @@ const CandleChart: React.FC<CandleChartProps> = ({
 
     // Add signal marker to chart
     const addSignalMarker = useCallback((signal: Signal, time: number) => {
+        const isSFP = signal.priority === 'high' || (signal.reason && signal.reason.includes('SFP'));
+        
         const marker: SignalMarker = {
             time: time as Time,  // SOTA FIX: Use raw UTC timestamp
             position: signal.type === 'BUY' ? 'belowBar' : 'aboveBar',
-            color: signal.type === 'BUY' ? BINANCE_COLORS.buy : BINANCE_COLORS.sell,
+            // SFP uses Gold color, Normal uses Buy/Sell colors
+            color: isSFP ? '#F0B90B' : (signal.type === 'BUY' ? BINANCE_COLORS.buy : BINANCE_COLORS.sell),
             shape: signal.type === 'BUY' ? 'arrowUp' : 'arrowDown',
-            text: signal.type === 'BUY' ? '▲ BUY' : '▼ SELL',
-            size: 2,
+            // SOTA: No text on chart to keep it clean, tooltip shows details
+            text: isSFP ? 'SFP' : '', 
+            size: isSFP ? 2 : 1, // Larger for SFP
             id: `${signal.type}-${time}`,
             signal: signal
         };
@@ -538,6 +545,16 @@ const CandleChart: React.FC<CandleChartProps> = ({
             bbFillPluginRef.current = bbFillPlugin;
         }
 
+        // Initialize Liquidity Zone Plugin
+        if (candleSeriesRef.current) {
+            const lzPlugin = new LiquidityZonePlugin({
+                demandColor: 'rgba(0, 150, 136, 0.15)', // Green tint
+                supplyColor: 'rgba(255, 82, 82, 0.15)', // Red tint
+            });
+            candleSeriesRef.current.attachPrimitive(lzPlugin);
+            liquidityZonePluginRef.current = lzPlugin;
+        }
+
         // Note: Price lines for Entry/SL/TP are now created dynamically
         // using candleSeries.createPriceLine() when positions are open
 
@@ -590,6 +607,10 @@ const CandleChart: React.FC<CandleChartProps> = ({
             // This allows fresh data for this timeframe while preserving others
             lastRenderedTimeRef.current[timeframe] = 0;
             setSignals([]);
+            // SOTA FIX: Clear Liquidity Zones when changing symbol/timeframe to prevent ghost zones
+            if (liquidityZonePluginRef.current) {
+                liquidityZonePluginRef.current.setData([]);
+            }
 
             // SOTA: Track symbol change
             if (prevSymbolRef.current !== activeSymbol) {
@@ -753,14 +774,14 @@ const CandleChart: React.FC<CandleChartProps> = ({
             : signals;
 
         // Convert SignalMarker to lightweight-charts marker format
-        // SOTA: No text labels - just arrows for clean professional look
+        // SOTA: Minimal style, text only for SFP
         const chartMarkers: SeriesMarker<Time>[] = limitedSignals.map(s => ({
             time: s.time,
             position: s.position,
             color: s.color,
             shape: s.shape,
-            text: '',  // SOTA: Remove text labels to reduce chart clutter
-            size: 1,   // Smaller size for less visual noise
+            text: s.text,  
+            size: s.size,
         }));
 
         // Sort markers by time (required by lightweight-charts)
@@ -897,6 +918,35 @@ const CandleChart: React.FC<CandleChartProps> = ({
                         time: candleStartTime as Time,
                         value: realtimeData.bollinger.lower_band
                     });
+                }
+                
+                // Update Liquidity Zones (Plugin)
+                if (liquidityZonePluginRef.current && realtimeData.liquidity_zones) {
+                    const zones: ZoneData[] = [];
+                    // SL Clusters (Demand/Support if below price, Supply/Resist if above)
+                    // Usually SL clusters below price = Demand zones to buy SFP
+                    if (realtimeData.liquidity_zones.stop_loss_clusters) {
+                        realtimeData.liquidity_zones.stop_loss_clusters.forEach(z => {
+                            zones.push({
+                                priceHigh: z.zone_high,
+                                priceLow: z.zone_low,
+                                type: 'demand', // Green for buying opps
+                                strength: z.strength
+                            });
+                        });
+                    }
+                    // TP Zones (Supply)
+                    if (realtimeData.liquidity_zones.take_profit_zones) {
+                        realtimeData.liquidity_zones.take_profit_zones.forEach(z => {
+                            zones.push({
+                                priceHigh: z.zone_high,
+                                priceLow: z.zone_low,
+                                type: 'supply', // Red for selling opps
+                                strength: z.strength
+                            });
+                        });
+                    }
+                    liquidityZonePluginRef.current.setData(zones);
                 }
             }
 

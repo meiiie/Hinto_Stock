@@ -24,6 +24,7 @@ class ConditionType(Enum):
     MOMENTUM_TRIGGER = "momentum_trigger"
     CANDLE_CONFIRMATION = "candle_confirmation"
     VOLUME_CONFIRMATION = "volume_confirmation"
+    VOLUME_DELTA_CONFIRMATION = "volume_delta_confirmation"
 
 
 @dataclass
@@ -59,7 +60,8 @@ class ConfluenceScorer:
         ConditionType.PULLBACK_ZONE: 0.30,        # Near support (most important)
         ConditionType.MOMENTUM_TRIGGER: 0.25,     # StochRSI cross
         ConditionType.CANDLE_CONFIRMATION: 0.10,  # Green/Red candle
-        ConditionType.VOLUME_CONFIRMATION: 0.10,  # Volume spike
+        ConditionType.VOLUME_CONFIRMATION: 0.05,  # Volume spike (reduced)
+        ConditionType.VOLUME_DELTA_CONFIRMATION: 0.05, # Delta confirmation (new)
     }
     
     def __init__(

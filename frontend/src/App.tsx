@@ -21,8 +21,10 @@ import SignalLogItem from './components/SignalLogItem';
 import SignalCard, { TradingSignal } from './components/SignalCard';
 import ErrorBoundary from './components/ErrorBoundary';
 import StateIndicator, { TradingState } from './components/StateIndicator';
+import { MomentumWidget } from './components/MomentumWidget';
 import TokenIcon from './components/TokenIcon';
 import TokenSelector from './components/TokenSelector';
+import Backtest from './pages/Backtest';
 import { THEME } from './styles/theme';
 import { apiUrl, ENDPOINTS } from './config/api';
 
@@ -43,7 +45,7 @@ interface SignalLog {
   trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
 }
 
-type Tab = 'chart' | 'portfolio' | 'history' | 'performance' | 'settings';
+type Tab = 'chart' | 'portfolio' | 'history' | 'performance' | 'settings' | 'backtest';
 
 // Design tokens - using THEME for consistency (Phase C)
 const C = {
@@ -366,7 +368,9 @@ function App() {
   const tabs: { id: Tab; label: string }[] = [
     { id: 'chart', label: 'Chart' },
     { id: 'portfolio', label: 'Portfolio' },
+    { id: 'backtest', label: 'Backtest' },
     { id: 'history', label: 'History' },
+    { id: 'performance', label: 'Performance' },
     { id: 'settings', label: 'Settings' },
   ];
 
@@ -528,6 +532,8 @@ function App() {
                 <span>RSI: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: (marketData?.rsi || 50) > 70 ? C.down : (marketData?.rsi || 50) < 30 ? C.up : C.text1 }}>{marketData?.rsi?.toFixed(1) || '---'}</span></span>
                 <span>VWAP: <span style={{ fontFamily: "'JetBrains Mono', monospace", color: C.yellow }}>{marketData?.vwap ? formatPrice(marketData.vwap) : '---'}</span></span>
               </div>
+              {/* SOTA: Momentum Velocity Widget - grouped with indicators */}
+              <MomentumWidget />
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -657,6 +663,7 @@ function App() {
           <div style={{ height: '100%', overflowY: 'auto', padding: '16px' }}>
             <div style={{ maxWidth: '1152px', margin: '0 auto' }}>
               {activeTab === 'portfolio' && <Portfolio />}
+              {activeTab === 'backtest' && <Backtest />}
               {activeTab === 'history' && <TradeHistory />}
               {activeTab === 'performance' && <PerformanceDashboard />}
               {activeTab === 'settings' && <Settings />}

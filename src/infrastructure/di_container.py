@@ -31,6 +31,8 @@ from .indicators.adx_calculator import ADXCalculator
 from .indicators.atr_calculator import ATRCalculator
 from .indicators.volume_spike_detector import VolumeSpikeDetector
 from .indicators.regime_detector import RegimeDetector  # SOTA: For Layer 0 filtering
+from .indicators.sfp_detector import SFPDetector  # SOTA: Phase 1 SFP
+from .indicators.momentum_velocity_calculator import MomentumVelocityCalculator # SOTA: Phase 2 Velocity
 from .websocket.binance_websocket_client import BinanceWebSocketClient
 from .websocket.binance_book_ticker_client import BinanceBookTickerClient
 from .aggregation.data_aggregator import DataAggregator
@@ -45,7 +47,6 @@ from ..application.services.warmup_manager import WarmupManager
 from ..application.services.hard_filters import HardFilters
 from ..application.services.state_recovery_service import StateRecoveryService
 from ..application.services.smart_entry_calculator import SmartEntryCalculator
-from ..application.signals.signal_generator import SignalGenerator
 from ..application.analysis.trend_filter import TrendFilter # SOTA: For HTF Confluence
 
 
@@ -491,6 +492,88 @@ class DIContainer:
             self._instances['volume_spike_detector'] = VolumeSpikeDetector()
         return self._instances['volume_spike_detector']
     
+    def get_swing_point_detector(self):
+        """Get SwingPointDetector instance (singleton)."""
+        if 'swing_point_detector' not in self._instances:
+            from .indicators.swing_point_detector import SwingPointDetector
+            self._instances['swing_point_detector'] = SwingPointDetector(lookback=5)
+        return self._instances['swing_point_detector']
+
+    def get_tp_calculator(self):
+        """Get TPCalculator instance (singleton) with SwingPointDetector injected."""
+        if 'tp_calculator' not in self._instances:
+            from ..application.services.tp_calculator import TPCalculator
+            swing_detector = self.get_swing_point_detector()
+            self._instances['tp_calculator'] = TPCalculator(swing_detector=swing_detector)
+        return self._instances['tp_calculator']
+    
+    # ==================== Volume Upgrade Plan (Expert Feedback) ====================
+    
+    def get_volume_profile_calculator(self):
+        """
+        Get VolumeProfileCalculator instance (singleton).
+        
+        SOTA: Volume Profile approximation from OHLC + VWAP data.
+        Identifies POC, VAH, VAL for institutional trading zones.
+        
+        Returns:
+            VolumeProfileCalculator for Volume Profile analysis
+        """
+        if 'volume_profile_calculator' not in self._instances:
+            from .indicators.volume_profile_calculator import VolumeProfileCalculator
+            
+            self._instances['volume_profile_calculator'] = VolumeProfileCalculator(
+                num_bins=50,
+                value_area_pct=0.70,
+                vwap_calculator=self.get_vwap_calculator()
+            )
+            self.logger.info("Created VolumeProfileCalculator (Volume Upgrade Phase 1)")
+        
+        return self._instances['volume_profile_calculator']
+    
+    def get_volume_delta_calculator(self):
+        """
+        Get VolumeDeltaCalculator instance (singleton).
+        
+        SOTA: Approximates buy/sell volume from candle structure.
+        Includes divergence detection for reversal signals.
+        
+        Returns:
+            VolumeDeltaCalculator for Order Flow approximation
+        """
+        if 'volume_delta_calculator' not in self._instances:
+            from .indicators.volume_delta_calculator import VolumeDeltaCalculator
+            
+            self._instances['volume_delta_calculator'] = VolumeDeltaCalculator(
+                divergence_lookback=14
+            )
+            self.logger.info("Created VolumeDeltaCalculator (Volume Upgrade Phase 2)")
+        
+        return self._instances['volume_delta_calculator']
+    
+    def get_liquidity_zone_detector(self):
+        """
+        Get LiquidityZoneDetector instance (singleton).
+        
+        SOTA: Detects SL clusters, TP zones, and breakout zones.
+        Optimizes stop loss and take profit placement.
+        
+        Returns:
+            LiquidityZoneDetector for risk management optimization
+        """
+        if 'liquidity_zone_detector' not in self._instances:
+            from ..application.risk_management.liquidity_zone_detector import LiquidityZoneDetector
+            
+            self._instances['liquidity_zone_detector'] = LiquidityZoneDetector(
+                atr_calculator=self.get_atr_calculator(),
+                vwap_calculator=self.get_vwap_calculator(),
+                swing_lookback=5,
+                zone_atr_multiplier=0.5
+            )
+            self.logger.info("Created LiquidityZoneDetector (Volume Upgrade Phase 3)")
+        
+        return self._instances['liquidity_zone_detector']
+    
     def get_regime_detector(self) -> RegimeDetector:
         """
         Get RegimeDetector instance (singleton).
@@ -512,7 +595,43 @@ class DIContainer:
             )
         return self._instances['regime_detector']
     
-    def get_signal_generator(self) -> SignalGenerator:
+    def get_sfp_detector(self) -> SFPDetector:
+        """
+        Get SFPDetector instance (singleton).
+        
+        SOTA: Phase 1 SFP Integration.
+        """
+        if 'sfp_detector' not in self._instances:
+            self._instances['sfp_detector'] = SFPDetector()
+            self.logger.info("Created SFPDetector")
+        return self._instances['sfp_detector']
+    
+    def get_momentum_velocity_calculator(self) -> MomentumVelocityCalculator:
+        """
+        Get MomentumVelocityCalculator instance (singleton).
+        
+        SOTA: Phase 2 Momentum Velocity (FOMO Filter).
+        """
+        if 'momentum_velocity_calculator' not in self._instances:
+            self._instances['momentum_velocity_calculator'] = MomentumVelocityCalculator()
+            self.logger.info("Created MomentumVelocityCalculator")
+        return self._instances['momentum_velocity_calculator']
+    
+    def get_order_block_detector(self):
+        """Get OrderBlockDetector instance (singleton)."""
+        if 'order_block_detector' not in self._instances:
+            from .indicators.order_block_detector import OrderBlockDetector
+            self._instances['order_block_detector'] = OrderBlockDetector()
+        return self._instances['order_block_detector']
+
+    def get_fvg_detector(self):
+        """Get FVGDetector instance (singleton)."""
+        if 'fvg_detector' not in self._instances:
+            from .indicators.fvg_detector import FVGDetector
+            self._instances['fvg_detector'] = FVGDetector()
+        return self._instances['fvg_detector']
+
+    def get_signal_generator(self):
         """
         Get SignalGenerator instance with all dependencies (singleton).
         
@@ -522,6 +641,9 @@ class DIContainer:
             SignalGenerator with injected calculators and config
         """
         if 'signal_generator' not in self._instances:
+            # Lazy import to avoid circular dependency
+            from ..application.signals.signal_generator import SignalGenerator
+            
             # SOTA: Get strategy config from centralized Config
             config = self.get_config_instance()
             strategy_config = config.strategy
@@ -530,8 +652,13 @@ class DIContainer:
                 vwap_calculator=self.get_vwap_calculator(),
                 bollinger_calculator=self.get_bollinger_calculator(),
                 stoch_rsi_calculator=self.get_stoch_rsi_calculator(),
+                tp_calculator=self.get_tp_calculator(),  # SOTA: Inject TP calculator with Swing Detector
                 smart_entry_calculator=SmartEntryCalculator(),
                 volume_spike_detector=self.get_volume_spike_detector(),
+                volume_delta_calculator=self.get_volume_delta_calculator(),
+                liquidity_zone_detector=self.get_liquidity_zone_detector(),
+                sfp_detector=self.get_sfp_detector(),
+                momentum_velocity_calculator=self.get_momentum_velocity_calculator(),
                 adx_calculator=self.get_adx_calculator(),
                 atr_calculator=self.get_atr_calculator(),
                 talib_calculator=self.get_indicator_calculator(),
@@ -602,6 +729,39 @@ class DIContainer:
         
         return self._instances['signal_lifecycle_service']
     
+    def get_signal_confirmation_service(self):
+        """
+        Get SignalConfirmationService instance (singleton).
+        
+        SOTA FIX: Prevents whipsaw by requiring 2 consecutive signals
+        in the same direction before execution.
+        
+        Returns:
+            SignalConfirmationService for signal confirmation
+        """
+        if 'signal_confirmation_service' not in self._instances:
+            # Lazy import to avoid circular dependency
+            from ..application.services.signal_confirmation_service import SignalConfirmationService
+            
+            # Get config for confirmation settings
+            config = self.get_config_instance()
+            strategy_config = config.strategy
+            
+            # Default: 2 confirmations, 3 minute timeout
+            min_confirmations = 2
+            max_wait_seconds = 180
+            
+            self._instances['signal_confirmation_service'] = SignalConfirmationService(
+                min_confirmations=min_confirmations,
+                max_wait_seconds=max_wait_seconds
+            )
+            self.logger.info(
+                f"Created SignalConfirmationService: "
+                f"min_confirmations={min_confirmations}, max_wait={max_wait_seconds}s"
+            )
+        
+        return self._instances['signal_confirmation_service']
+    
     def get_trend_filter(self) -> TrendFilter:
         """Get TrendFilter instance (singleton)."""
         if 'trend_filter' not in self._instances:
@@ -646,6 +806,8 @@ class DIContainer:
                 lifecycle_service=self.get_signal_lifecycle_service(),
                 # SOTA FIX: Inject trend_filter for HTF Confluence (Phase 12)
                 trend_filter=self.get_trend_filter(),
+                # CRITICAL FIX: Inject signal confirmation for whipsaw prevention!
+                signal_confirmation_service=self.get_signal_confirmation_service(),
             )
             self.logger.info(f"✅ Created RealtimeService for {symbol} with all services injected!")
         

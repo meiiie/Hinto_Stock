@@ -241,13 +241,13 @@ class StrategyConfig:
     bb_near_threshold_pct: float = 0.025  # 2.5% (was 1.5%)
     vwap_near_threshold_pct: float = 0.020  # 2.0% (was 1.0%)
     
-    # Regime filter settings - SOFTENED
+    # Regime filter settings - FIXED for whipsaw prevention
     adx_trending_threshold: float = 20.0  # Lowered from 25 for more opportunities
-    regime_filter_mode: str = "penalty"  # "block" | "penalty" - SOTA: penalty mode
-    regime_penalty_pct: float = 0.30  # 30% confidence reduction in ranging
+    regime_filter_mode: str = "block"  # CRITICAL FIX: "block" prevents trading in ranging markets
+    regime_penalty_pct: float = 0.30  # 30% confidence reduction (only used in penalty mode)
     
-    # Confluence scoring - NEW FEATURE
-    min_confluence_score: float = 0.60  # 60% weighted score (vs 80% condition count)
+    # Confluence scoring - TUNED for quality
+    min_confluence_score: float = 0.70  # INCREASED from 0.60 to reduce false signals
     use_weighted_confluence: bool = True
     
     # Confluence condition weights (must sum to 1.0)
@@ -358,7 +358,7 @@ class Config:
         # Load optional overrides from environment
         strict_mode = os.getenv("STRATEGY_STRICT_MODE", "false").lower() in ("true", "1", "yes")
         use_regime_filter = os.getenv("STRATEGY_USE_REGIME_FILTER", "true").lower() in ("true", "1", "yes")
-        regime_filter_mode = os.getenv("STRATEGY_REGIME_FILTER_MODE", "penalty")
+        regime_filter_mode = os.getenv("STRATEGY_REGIME_FILTER_MODE", "block")  # Default to block
         
         # Parse numeric values with defaults
         def parse_float(key: str, default: float) -> float:
@@ -371,7 +371,7 @@ class Config:
         bb_threshold = parse_float("STRATEGY_BB_THRESHOLD_PCT", 0.025)
         vwap_threshold = parse_float("STRATEGY_VWAP_THRESHOLD_PCT", 0.020)
         adx_threshold = parse_float("STRATEGY_ADX_THRESHOLD", 20.0)
-        min_confluence = parse_float("STRATEGY_MIN_CONFLUENCE_SCORE", 0.60)
+        min_confluence = parse_float("STRATEGY_MIN_CONFLUENCE_SCORE", 0.70)  # Increased for quality
         
         self.strategy = StrategyConfig(
             strict_mode=strict_mode,

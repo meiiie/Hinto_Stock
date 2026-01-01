@@ -17,6 +17,7 @@ export interface TradingSignal {
   id: string;  // Backend UUID or custom fallback
   type: 'BUY' | 'SELL';
   symbol: string;
+  priority?: 'HIGH' | 'MEDIUM' | 'LOW'; // SOTA: Signal Priority
   timestamp: string;  // generated_at
   entry: number;
   stopLoss: number;
@@ -140,7 +141,11 @@ export default function SignalCard({ signal, currentPrice, onExecute, onDismiss 
   }
 
   const isBuy = signal.type === 'BUY';
+  const isHighPriority = signal.priority === 'HIGH';
   const signalColor = isBuy ? C.up : C.down;
+  const borderColor = isHighPriority ? C.yellow : signalColor; // Gold border for High Priority
+  const boxShadow = isHighPriority ? `0 0 30px ${C.yellow}66` : `0 0 20px ${signalColor}33`;
+  
   const riskAmount = Math.abs(signal.entry - signal.stopLoss);
   const riskPercent = ((riskAmount / signal.entry) * 100).toFixed(2);
   const distanceToEntry = ((currentPrice - signal.entry) / signal.entry * 100).toFixed(2);
@@ -160,10 +165,19 @@ export default function SignalCard({ signal, currentPrice, onExecute, onDismiss 
     <div style={{
       backgroundColor: C.card,
       borderRadius: '8px',
-      border: `1px solid ${signalColor}`,
+      border: `1px solid ${borderColor}`,
       overflow: 'hidden',
-      boxShadow: `0 0 20px ${signalColor}33`,
+      boxShadow: boxShadow,
+      transition: 'all 0.3s ease-in-out',
+      animation: isHighPriority ? 'pulse-border 2s infinite' : 'none'
     }}>
+      <style>{`
+        @keyframes pulse-border {
+          0% { border-color: ${C.yellow}44; }
+          50% { border-color: ${C.yellow}; }
+          100% { border-color: ${C.yellow}44; }
+        }
+      `}</style>
       {/* Header */}
       <div
         onClick={() => setIsExpanded(!isExpanded)}
@@ -209,6 +223,27 @@ export default function SignalCard({ signal, currentPrice, onExecute, onDismiss 
               }}>
                 {signal.strategy}
               </span>
+              {signal.priority && (
+                <span style={{
+                  fontSize: '9px',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  backgroundColor: signal.priority === 'HIGH' ? '#ffc10733' : '#9e9e9e33',
+                  color: signal.priority === 'HIGH' ? '#ffc107' : '#9e9e9e',
+                  fontWeight: 800,
+                  border: signal.priority === 'HIGH' ? '1px solid #ffc107' : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  {signal.priority === 'HIGH' && (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  )}
+                  {signal.priority === 'HIGH' ? 'URGENT' : signal.priority}
+                </span>
+              )}
               {signal.status && (
                 <span style={{
                   fontSize: '9px',

@@ -90,40 +90,24 @@ class TPCalculator:
         entry_price: float,
         stop_loss: float,
         direction: str,
-        candles: List[Candle]
+        candles: List[Candle],
+        atr_value: Optional[float] = None,
+        force_breakout: bool = False
     ) -> Optional[TPCalculationResult]:
         """
         Calculate multi-target TP levels based on support/resistance.
-        
-        For BUY signals:
-        - TP1: Nearest resistance above entry
-        - TP2: Major resistance above TP1
-        - TP3: TP2 + 1.5% extension
-        
-        For SELL signals:
-        - TP1: Nearest support below entry
-        - TP2: Major support below TP1
-        - TP3: TP2 - 1.5% extension
+        SOTA Upgrade: Supports Hybrid Breakout Logic using ATR when Swing R:R is poor.
         
         Args:
             entry_price: Entry price
             stop_loss: Stop loss price
             direction: 'BUY' or 'SELL'
             candles: List of Candle entities
+            atr_value: Current ATR value (for breakout calculation)
+            force_breakout: If True, ignore near swing points if they block the trade
         
         Returns:
             TPCalculationResult or None if calculation fails
-        
-        Example:
-            >>> calculator = TPCalculator()
-            >>> result = calculator.calculate_tp_levels(
-            ...     entry_price=50000.0,
-            ...     stop_loss=49500.0,
-            ...     direction='BUY',
-            ...     candles=candles
-            ... )
-            >>> if result and result.is_valid:
-            ...     print(f"TP1: ${result.tp_levels.tp1:,.2f}")
         """
         # Validate inputs
         if direction not in ['BUY', 'SELL']:
@@ -149,27 +133,21 @@ class TPCalculator:
         
         # Calculate based on direction
         if direction == 'BUY':
-            return self._calculate_buy_tp_levels(entry_price, stop_loss, candles)
+            return self._calculate_buy_tp_levels(entry_price, stop_loss, candles, atr_value, force_breakout)
         else:  # SELL
-            return self._calculate_sell_tp_levels(entry_price, stop_loss, candles)
+            return self._calculate_sell_tp_levels(entry_price, stop_loss, candles, atr_value, force_breakout)
     
     def _calculate_buy_tp_levels(
         self,
         entry_price: float,
         stop_loss: float,
-        candles: List[Candle]
+        candles: List[Candle],
+        atr_value: Optional[float] = None,
+        force_breakout: bool = False
     ) -> Optional[TPCalculationResult]:
-        """
-        Calculate TP levels for BUY signal.
+        """Calculate TP levels for BUY signal with Breakout Fallback."""
+        risk = entry_price - stop_loss
         
-        Args:
-            entry_price: Entry price
-            stop_loss: Stop loss price
-            candles: List of candles
-        
-        Returns:
-            TPCalculationResult or None
-        """
         # Check if swing_detector is available
         if self.swing_detector is None:
             self.logger.warning("swing_detector not available, using fallback TP calculation")
@@ -180,142 +158,120 @@ class TPCalculator:
             candles, num_levels=5
         )
         
-        if not resistances:
-            self.logger.debug("No resistance levels found for BUY TP calculation")
-            # Fallback: use percentage-based TPs
-            return self._calculate_fallback_buy_tp(entry_price, stop_loss)
+        valid_resistances = [r for r in resistances if r > entry_price] if resistances else []
         
-        # Filter resistances above entry price
-        valid_resistances = [r for r in resistances if r > entry_price]
+        # Strategy A: Swing Point TP
+        swing_tp_valid = False
+        if len(valid_resistances) >= 1:
+            tp1_swing = valid_resistances[0]
+            reward_swing = tp1_swing - entry_price
+            rr_swing = reward_swing / risk if risk > 0 else 0
+            
+            if rr_swing >= self.min_risk_reward:
+                # Good Swing Trade
+                tp2 = valid_resistances[1] if len(valid_resistances) > 1 else tp1_swing * 1.01
+                tp3 = tp2 * (1 + self.tp3_extension_pct)
+                
+                return TPCalculationResult(
+                    tp_levels=TPLevels(tp1=tp1_swing, tp2=tp2, tp3=tp3, sizes=[0.6, 0.3, 0.1]),
+                    risk_reward_ratio=rr_swing,
+                    support_resistance_levels=valid_resistances,
+                    is_valid=True,
+                    calculation_method='swing_structure'
+                )
+            else:
+                self.logger.debug(f"Swing RR too low: {rr_swing:.2f} < {self.min_risk_reward}")
         
-        if len(valid_resistances) < 2:
-            self.logger.warning(f"Insufficient resistances above entry: {len(valid_resistances)}")
-            return self._calculate_fallback_buy_tp(entry_price, stop_loss)
+        # Strategy B: Breakout ATR TP (If Swing failed or N/A, AND momentum is strong)
+        if force_breakout and atr_value:
+            # Assume price will break the resistance
+            tp1_atr = entry_price + (atr_value * 2.0) # Aim for 2 ATR move (Breakout)
+            reward_atr = tp1_atr - entry_price
+            rr_atr = reward_atr / risk if risk > 0 else 0
+            
+            if rr_atr >= self.min_risk_reward:
+                self.logger.info(f"🚀 SWITCHING TO BREAKOUT TP: Swing RR low, but Momentum is High. Target: {tp1_atr:.2f}")
+                return self.calculate_tp_levels_atr_based(entry_price, 'BUY', atr_value)
         
-        # TP1: Nearest resistance (60% position)
-        tp1 = valid_resistances[0]
-        
-        # TP2: Next major resistance (30% position)
-        tp2 = valid_resistances[1] if len(valid_resistances) > 1 else tp1 * 1.01
-        
-        # TP3: Extended target 1.5% beyond TP2 (10% position)
-        tp3 = tp2 * (1 + self.tp3_extension_pct)
-        
-        # Calculate risk-reward ratio for TP1
-        risk = entry_price - stop_loss
-        reward = tp1 - entry_price
-        risk_reward_ratio = reward / risk if risk > 0 else 0
-        
-        # Validate minimum R:R ratio
-        is_valid = risk_reward_ratio >= self.min_risk_reward
-        
-        tp_levels = TPLevels(
-            tp1=tp1,
-            tp2=tp2,
-            tp3=tp3,
-            sizes=[0.6, 0.3, 0.1]
-        )
-        
-        result = TPCalculationResult(
-            tp_levels=tp_levels,
-            risk_reward_ratio=risk_reward_ratio,
-            support_resistance_levels=valid_resistances,
-            is_valid=is_valid
-        )
-        
-        if is_valid:
-            self.logger.info(
-                f"BUY TP calculated: TP1=${tp1:.2f}, TP2=${tp2:.2f}, TP3=${tp3:.2f}, "
-                f"R:R={risk_reward_ratio:.2f}"
-            )
-        else:
-            self.logger.warning(
-                f"BUY TP invalid: R:R={risk_reward_ratio:.2f} < {self.min_risk_reward}"
-            )
-        
-        return result
-    
+        # If we reach here, neither Swing nor Breakout logic yielded a valid trade
+        # Return the Swing result (even if invalid) so the caller knows why it failed
+        if valid_resistances:
+             tp1 = valid_resistances[0]
+             return TPCalculationResult(
+                tp_levels=TPLevels(tp1=tp1, tp2=tp1*1.01, tp3=tp1*1.02, sizes=[0.6, 0.3, 0.1]),
+                risk_reward_ratio=(tp1 - entry_price) / risk,
+                support_resistance_levels=valid_resistances,
+                is_valid=False, # Invalid
+                calculation_method='swing_structure'
+             )
+             
+        return self._calculate_fallback_buy_tp(entry_price, stop_loss)
+
     def _calculate_sell_tp_levels(
         self,
         entry_price: float,
         stop_loss: float,
-        candles: List[Candle]
+        candles: List[Candle],
+        atr_value: Optional[float] = None,
+        force_breakout: bool = False
     ) -> Optional[TPCalculationResult]:
-        """
-        Calculate TP levels for SELL signal.
+        """Calculate TP levels for SELL signal with Breakout Fallback."""
+        risk = stop_loss - entry_price
         
-        Args:
-            entry_price: Entry price
-            stop_loss: Stop loss price
-            candles: List of candles
-        
-        Returns:
-            TPCalculationResult or None
-        """
         # Check if swing_detector is available
         if self.swing_detector is None:
             self.logger.warning("swing_detector not available, using fallback TP calculation")
             return self._calculate_fallback_sell_tp(entry_price, stop_loss)
         
-        # Find support levels (swing lows)
+        # Find support levels
         supports, resistances = self.swing_detector.find_support_resistance_levels(
             candles, num_levels=5
         )
         
-        if not supports:
-            self.logger.debug("No support levels found for SELL TP calculation")
-            # Fallback: use percentage-based TPs
-            return self._calculate_fallback_sell_tp(entry_price, stop_loss)
+        valid_supports = [s for s in supports if s < entry_price] if supports else []
         
-        # Filter supports below entry price
-        valid_supports = [s for s in supports if s < entry_price]
-        
-        if len(valid_supports) < 2:
-            self.logger.warning(f"Insufficient supports below entry: {len(valid_supports)}")
-            return self._calculate_fallback_sell_tp(entry_price, stop_loss)
-        
-        # TP1: Nearest support (60% position)
-        tp1 = valid_supports[-1]  # Highest support below entry
-        
-        # TP2: Next major support (30% position)
-        tp2 = valid_supports[-2] if len(valid_supports) > 1 else tp1 * 0.99
-        
-        # TP3: Extended target 1.5% beyond TP2 (10% position)
-        tp3 = tp2 * (1 - self.tp3_extension_pct)
-        
-        # Calculate risk-reward ratio for TP1
-        risk = stop_loss - entry_price
-        reward = entry_price - tp1
-        risk_reward_ratio = reward / risk if risk > 0 else 0
-        
-        # Validate minimum R:R ratio
-        is_valid = risk_reward_ratio >= self.min_risk_reward
-        
-        tp_levels = TPLevels(
-            tp1=tp1,
-            tp2=tp2,
-            tp3=tp3,
-            sizes=[0.6, 0.3, 0.1]
-        )
-        
-        result = TPCalculationResult(
-            tp_levels=tp_levels,
-            risk_reward_ratio=risk_reward_ratio,
-            support_resistance_levels=valid_supports,
-            is_valid=is_valid
-        )
-        
-        if is_valid:
-            self.logger.info(
-                f"SELL TP calculated: TP1=${tp1:.2f}, TP2=${tp2:.2f}, TP3=${tp3:.2f}, "
-                f"R:R={risk_reward_ratio:.2f}"
-            )
-        else:
-            self.logger.warning(
-                f"SELL TP invalid: R:R={risk_reward_ratio:.2f} < {self.min_risk_reward}"
-            )
-        
-        return result
+        # Strategy A: Swing Point TP
+        if len(valid_supports) >= 1:
+            tp1_swing = valid_supports[-1] # Highest support below entry
+            reward_swing = entry_price - tp1_swing
+            rr_swing = reward_swing / risk if risk > 0 else 0
+            
+            if rr_swing >= self.min_risk_reward:
+                tp2 = valid_supports[-2] if len(valid_supports) > 1 else tp1_swing * 0.99
+                tp3 = tp2 * (1 - self.tp3_extension_pct)
+                
+                return TPCalculationResult(
+                    tp_levels=TPLevels(tp1=tp1_swing, tp2=tp2, tp3=tp3, sizes=[0.6, 0.3, 0.1]),
+                    risk_reward_ratio=rr_swing,
+                    support_resistance_levels=valid_supports,
+                    is_valid=True,
+                    calculation_method='swing_structure'
+                )
+            else:
+                self.logger.debug(f"Swing RR too low: {rr_swing:.2f} < {self.min_risk_reward}")
+
+        # Strategy B: Breakout ATR TP
+        if force_breakout and atr_value:
+            tp1_atr = entry_price - (atr_value * 2.0)
+            reward_atr = entry_price - tp1_atr
+            rr_atr = reward_atr / risk if risk > 0 else 0
+            
+            if rr_atr >= self.min_risk_reward:
+                self.logger.info(f"🚀 SWITCHING TO BREAKOUT TP: Swing RR low, but Momentum is High. Target: {tp1_atr:.2f}")
+                return self.calculate_tp_levels_atr_based(entry_price, 'SELL', atr_value)
+
+        # Fail
+        if valid_supports:
+             tp1 = valid_supports[-1]
+             return TPCalculationResult(
+                tp_levels=TPLevels(tp1=tp1, tp2=tp1*0.99, tp3=tp1*0.98, sizes=[0.6, 0.3, 0.1]),
+                risk_reward_ratio=(entry_price - tp1) / risk,
+                support_resistance_levels=valid_supports,
+                is_valid=False,
+                calculation_method='swing_structure'
+             )
+
+        return self._calculate_fallback_sell_tp(entry_price, stop_loss)
 
     def _calculate_fallback_buy_tp(
         self,

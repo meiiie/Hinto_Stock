@@ -186,6 +186,45 @@ class BinanceRestClient:
         except Exception as e:
             self.logger.error(f"Failed to get exchange info: {e}")
             return None
+
+    def get_top_volume_pairs(self, limit: int = 10, quote_asset: str = "USDT") -> List[str]:
+        """
+        Get top trading pairs by 24h quote volume.
+        
+        Args:
+            limit: Number of pairs to return
+            quote_asset: Filter by quote asset (e.g., 'USDT')
+            
+        Returns:
+            List of symbol strings (e.g., ['BTCUSDT', 'ETHUSDT'])
+        """
+        try:
+            url = f"{self.BASE_URL}/ticker/24hr"
+            response = requests.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            # Filter and sort
+            filtered = [
+                item for item in data 
+                if item['symbol'].endswith(quote_asset) 
+                and not item['symbol'].startswith('USDC') # Exclude stable pairs
+                and not item['symbol'].startswith('FDUSD')
+            ]
+            
+            # Sort by quoteVolume (descending)
+            sorted_pairs = sorted(
+                filtered, 
+                key=lambda x: float(x['quoteVolume']), 
+                reverse=True
+            )
+            
+            return [item['symbol'] for item in sorted_pairs[:limit]]
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get top volume pairs: {e}")
+            return []
     
     def __repr__(self) -> str:
         """String representation"""

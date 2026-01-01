@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import logging
 
-from src.api.routers import system, market, settings, trades, signals
+from src.api.routers import system, market, settings, trades, signals, backtest
 from src.api.routers.market import market_router
 from src.api.dependencies import get_realtime_service, get_container
 from src.api.event_bus import get_event_bus
@@ -160,6 +160,7 @@ app.include_router(market_router)  # /market/* endpoints
 app.include_router(settings.router)
 app.include_router(trades.router)
 app.include_router(signals.router)  # Signal lifecycle tracking
+app.include_router(backtest.router) # Backtest endpoint
 
 @app.get("/")
 async def root():

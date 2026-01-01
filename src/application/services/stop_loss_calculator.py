@@ -5,7 +5,7 @@ Calculates risk-based stop loss ensuring maximum 1% account risk.
 """
 
 import logging
-from typing import Optional, List
+from typing import Optional, List, Any
 from dataclasses import dataclass
 
 from ...domain.entities.candle import Candle
@@ -19,7 +19,7 @@ class StopLossResult:
     
     Attributes:
         stop_loss: Calculated stop loss price
-        stop_type: Type of stop ('swing', 'ema', 'risk_based', 'atr_based')
+        stop_type: Type of stop ('swing', 'ema', 'risk_based', 'atr_based', 'smart_liquidity')
         distance_from_entry_pct: Distance from entry in percentage
         swing_level: Swing level used (if applicable)
         ema_level: EMA level used (if applicable)
@@ -51,6 +51,7 @@ class StopLossCalculator:
     - SELL: Place stop above swing high or EMA(25)
     - Use more conservative (safer) stop
     - Validate minimum 0.3% distance from entry
+    - Smart Liquidity Stop Loss using Volume Profile
     
     Usage:
         calculator = StopLossCalculator(
@@ -98,6 +99,58 @@ class StopLossCalculator:
             f"StopLossCalculator initialized: "
             f"max_risk={max_risk_pct:.3%}, min_distance={min_distance_pct:.3%}"
         )
+
+    def calculate_smart_stop_loss(
+        self,
+        entry_price: float,
+        direction: str,
+        volume_profile: Any, # VolumeProfileResult
+        atr_value: float
+    ) -> float:
+        """
+        Calculate Smart Stop Loss using Volume Profile Value Area.
+        Puts SL outside value area to avoid liquidity hunts.
+        
+        Logic:
+        - LONG: SL < VAL (Value Area Low) - 0.5 * ATR
+        - SHORT: SL > VAH (Value Area High) + 0.5 * ATR
+        
+        Args:
+            entry_price: Entry price
+            direction: 'BUY' or 'SELL'
+            volume_profile: VolumeProfileResult object
+            atr_value: Current ATR value
+            
+        Returns:
+            Calculated stop loss price
+        """
+        if not volume_profile or atr_value <= 0:
+            # Fallback to standard 1.5% stop if VP not available
+            if direction == 'BUY':
+                return entry_price * 0.985
+            else:
+                return entry_price * 1.015
+                
+        buffer = atr_value * 0.5
+        
+        if direction == 'BUY':
+            # Place below Value Area Low
+            smart_sl = volume_profile.val - buffer
+            # Safety check: SL shouldn't be above entry
+            if smart_sl >= entry_price:
+                smart_sl = entry_price - (atr_value * 1.5)
+        else:
+            # Place above Value Area High
+            smart_sl = volume_profile.vah + buffer
+            # Safety check: SL shouldn't be below entry
+            if smart_sl <= entry_price:
+                smart_sl = entry_price + (atr_value * 1.5)
+                
+        self.logger.info(
+            f"🛡️ Smart Liquidity SL ({direction}): {smart_sl:.2f} "
+            f"(VAL={volume_profile.val:.2f}, VAH={volume_profile.vah:.2f}, ATR={atr_value:.2f})"
+        )
+        return smart_sl
 
     def calculate_stop_loss(
         self,

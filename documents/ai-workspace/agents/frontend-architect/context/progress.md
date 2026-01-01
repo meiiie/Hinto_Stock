@@ -191,11 +191,16 @@ Desktop Features:
 
 ## NEXT PRIORITIES
 
-1. Debug Signal Panel update issue
-2. Verify WebSocket SIGNAL event parsing
-3. Ensure VWAP/BB overlays render correctly
-4. Add Zustand for state management
-5. Improve error boundaries
+1. **Liquidity Visualization (✅ COMPLETED)**
+   - Implement `LiquidityZonePlugin.ts` for Supply/Demand zones
+   - Visualize SFP signals with markers (⚡)
+   - Update `SignalCard` with Priority UI
+2. **Chart UI Polish (✅ COMPLETED)**
+   - Custom BBFillPlugin for band fill
+   - Binance-style dark theme colors
+   - Vietnamese timezone support
+3. Add Zustand for state management (✅ Done - `marketStore.ts`)
+4. Improve error boundaries
 
 ---
 
@@ -238,3 +243,4 @@ From package.json:
 - tailwindcss: 4.1.17
 - vite: 7.0.4
 - typescript: 5.8.3
+- zustand: 5.0.3 (New)
