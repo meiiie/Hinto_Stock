@@ -84,15 +84,15 @@ class SignalGenerator:
         }
         return ctx
 
-    def generate_signal(self, candles: List[Candle], symbol: str, **kwargs) -> Optional[TradingSignal]:
+    def generate_signal(self, candles: List[Candle], symbol: str, htf_bias: str = 'NEUTRAL', **kwargs) -> Optional[TradingSignal]:
         if len(candles) < 50: return None
         config = StrategyRegistry.get_config(symbol)
         ctx = self._prepare_market_context(candles)
         
         # Use Limit Sniper Logic
-        return self._strategy_liquidity_sniper(ctx, config, symbol)
+        return self._strategy_liquidity_sniper(ctx, config, symbol, htf_bias)
 
-    def _strategy_liquidity_sniper(self, ctx: MarketContext, config: StrategyConfig, symbol: str) -> Optional[TradingSignal]:
+    def _strategy_liquidity_sniper(self, ctx: MarketContext, config: StrategyConfig, symbol: str, htf_bias: str) -> Optional[TradingSignal]:
         if not ctx.atr_result: return None
         
         # 1. Find recent Swing High/Low
@@ -125,6 +125,12 @@ class SignalGenerator:
             tp1 = limit_price * 0.98
             
         if not signal_type: return None
+
+        # SOTA: HTF Bias Filter DISABLED for SFP (Counter-trend nature)
+        # if signal_type == SignalType.BUY and htf_bias == 'BEARISH':
+        #     return None
+        # if signal_type == SignalType.SELL and htf_bias == 'BULLISH':
+        #     return None
 
         # 3. Calculate Score (for Shark Tank)
         # Higher score if closer to VWAP stretch or other confluence

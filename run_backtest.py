@@ -58,6 +58,7 @@ async def main():
     parser.add_argument("--balance", type=float, default=10000.0, help="Initial Shared Balance")
     parser.add_argument("--risk", type=float, default=0.01, help="Risk per trade (e.g. 0.01)")
     parser.add_argument("--leverage", type=float, default=0.0, help="Fixed Leverage (e.g. 5.0). If 0, use risk-based.")
+    parser.add_argument("--no-cb", action="store_true", help="Disable Circuit Breaker (Aggressive mode)")
     
     args = parser.parse_args()
     
@@ -88,9 +89,21 @@ async def main():
         max_leverage=max(5.0, args.leverage)
     )
     
+    # 3. Enhanced Analyzers (SOTA Filters)
+    from src.application.analysis.trend_filter import TrendFilter
+    from src.application.risk_management.circuit_breaker import CircuitBreaker
+    
+    trend_filter = TrendFilter(ema_period=200)
+    circuit_breaker = None
+    if not args.no_cb:
+        from src.application.risk_management.circuit_breaker import CircuitBreaker
+        circuit_breaker = CircuitBreaker(max_consecutive_losses=2, cooldown_hours=12)
+    
     engine = BacktestEngine(
         signal_generator=signal_gen,
-        simulator=simulator
+        simulator=simulator,
+        trend_filter=trend_filter,
+        circuit_breaker=circuit_breaker
     )
     
     # 3. Time Range
