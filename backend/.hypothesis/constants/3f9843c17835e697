@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\infrastructure\exchange\paper_exchange_service.py
+# hypothesis_version: 6.148.2
+
+[0.0, 'CLOSED', 'FILLED', 'NEW', 'OPEN', 'ORDER_NOT_FOUND', 'PENDING', 'paper']

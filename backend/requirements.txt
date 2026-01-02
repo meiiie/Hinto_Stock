@@ -1,0 +1,40 @@
+# Binance Data Pipeline - Requirements
+# Python Version: 3.10.9+ (tested with 3.13.7)
+
+# Core dependencies
+python-dotenv>=1.0.1
+requests>=2.31.0
+pandas>=2.0.3
+numpy>=1.24.3
+websockets>=12.0  # For real-time WebSocket connections
+
+# Technical Analysis
+# Note: TA-Lib requires manual installation on Windows
+# Download wheel from: https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib
+# For Python 3.10: TA_Lib-0.4.28-cp310-cp310-win_amd64.whl
+# For Python 3.13: TA_Lib-0.4.32-cp313-cp313-win_amd64.whl
+# Install: pip install <downloaded_wheel_file>
+TA-Lib==0.4.28  # Uncomment after manual installation
+
+# HMM Regime Detection (Layer 0)
+hmmlearn>=0.3.0
+
+# Scheduling
+APScheduler>=3.10.4
+
+# Dashboard (Streamlit)
+streamlit>=1.28.0
+plotly>=5.17.0
+
+# Testing
+pytest>=7.4.3
+pytest-cov>=4.1.0
+hypothesis>=6.100.0  # Property-based testing
+
+# Backend (FastAPI)
+fastapi>=0.109.0
+uvicorn>=0.27.0
+httpx>=0.27.0  # For async HTTP requests (token search/validate)
+
+# Data Warehouse (Parquet)
+pyarrow>=15.0.0

@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\domain\interfaces\i_liquidity_zone_detector.py
+# hypothesis_version: 6.148.2
+
+['analysis_high', 'analysis_low', 'breakout_zones', 'calculation_time_ms', 'is_broken', 'midpoint', 'nearest_resistance', 'nearest_support', 'stop_loss_clusters', 'strength', 'take_profit_zones', 'touch_count', 'width', 'zone_high', 'zone_low', 'zone_type']

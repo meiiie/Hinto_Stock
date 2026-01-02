@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\domain\entities\indicator.py
+# hypothesis_version: 6.148.2
+
+[100, 'N/A', 'NEUTRAL', 'OVERBOUGHT', 'OVERSOLD', 'ema_7', 'rsi_6', 'volume_ma_20']

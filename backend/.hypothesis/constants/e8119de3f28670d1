@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\infrastructure\indicators\stoch_rsi_calculator.py
+# hypothesis_version: 6.148.2
+
+[100, 'coerce', 'neutral', 'overbought', 'oversold']

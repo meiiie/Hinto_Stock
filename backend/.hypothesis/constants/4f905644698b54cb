@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\infrastructure\indicators\talib_calculator.py
+# hypothesis_version: 6.148.2
+
+[100, 'TALibCalculator', 'calculator', 'close', 'ema_25', 'ema_7', 'fallback_mode', 'high', 'low', 'open', 'rsi_6', 'talib_available', 'talib_version', 'volume', 'volume_ma_20']

@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\application\services\stop_loss_calculator.py
+# hypothesis_version: 6.148.2
+
+[0.0, 0.001, 0.003, 0.01, 0.015, 0.05, 0.5, 0.985, 0.99, 1.01, 1.015, 1.5, 3.0, 100, 'BUY', 'SELL', 'atr_based', 'ema', 'fallback', 'risk_based', 'swing']

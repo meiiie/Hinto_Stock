@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\infrastructure\api\binance_rest_client.py
+# hypothesis_version: 6.148.2
+
+[100, 1000, '1m', 'BTCUSDT', 'FDUSD', 'USDC', 'USDT', 'endTime', 'interval', 'limit', 'quoteVolume', 'serverTime', 'symbol']

@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\domain\entities\trading_signal.py
+# hypothesis_version: 6.148.2
+
+[0.65, 0.8, 1000, 'ConfidenceLevel', 'buy', 'confidence', 'confidence_level', 'entry_price', 'executed_at', 'execution_latency_ms', 'expired_at', 'generated_at', 'high', 'id', 'indicators', 'low', 'medium', 'neutral', 'order_id', 'outcome', 'pending_at', 'position_size', 'price', 'priority', 'reasons', 'risk_reward_ratio', 'sell', 'signal_type', 'status', 'stop_loss', 'symbol', 'tp_levels', '⚪', '🔴', '🟢']

@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\infrastructure\aggregation\data_aggregator.py
+# hypothesis_version: 6.148.2
+
+[100, '15m', '15m_forming', '15m_pending', '1h', '1h_forming', '1h_pending', '1m_total', 'All buffers cleared']

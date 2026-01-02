@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\infrastructure\api\binance_client.py
+# hypothesis_version: 6.148.2
+
+[100, 403, 429, 500, 1000, '15m', 'API access forbidden', 'BTCUSDT', 'Rate limit exceeded', 'X-MBX-APIKEY', 'close', 'close_time', 'high', 'ignore', 'interval', 'limit', 'low', 'ms', 'number_of_trades', 'open', 'open_time', 'quote_asset_volume', 'serverTime', 'symbol', 'timestamp', 'volume']

@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\infrastructure\persistence\sqlite_market_data_repository.py
+# hypothesis_version: 6.148.2
+
+[0.0, 100, 1024, '15m', '1h', '1m', ':memory:', 'btcusdt', 'crypto_data.db', 'latest_record', 'oldest_record', 'record_count', 'size_mb']

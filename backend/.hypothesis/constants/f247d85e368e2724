@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\domain\entities\portfolio.py
+# hypothesis_version: 6.148.2
+
+['balance', 'entry_price', 'equity', 'id', 'margin', 'open_positions', 'open_positions_count', 'open_time', 'quantity', 'realized_pnl', 'side', 'stop_loss', 'symbol', 'take_profit', 'unrealized_pnl']

@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\application\services\trading_state_machine.py
+# hypothesis_version: 6.148.2
+
+[100, 'EventBus', 'Trading allowed', 'btcusdt', 'can_receive_signals', 'cooldown_remaining', 'current_order_id', 'current_position_id', 'current_state', 'is_active_trading', 'is_halted', 'state', 'symbol', 'trading_allowed', 'transition_count']

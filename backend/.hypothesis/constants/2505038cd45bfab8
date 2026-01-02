@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\domain\entities\paper_position.py
+# hypothesis_version: 6.148.2
+
+[0.0, 100, 'LONG', 'close_time', 'entry_price', 'exit_reason', 'highest_price', 'id', 'leverage', 'liquidation_price', 'lowest_price', 'margin', 'open_time', 'quantity', 'realized_pnl', 'side', 'status', 'stop_loss', 'symbol', 'take_profit']

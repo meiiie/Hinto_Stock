@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\application\services\warmup_manager.py
+# hypothesis_version: 6.148.2
+
+[0.0, 1000, '15m', 'DataAggregator', '_cumulative_volume', 'btcusdt', 'reset']

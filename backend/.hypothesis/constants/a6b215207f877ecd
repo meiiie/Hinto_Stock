@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\infrastructure\indicators\adx_calculator.py
+# hypothesis_version: 6.148.2
+
+[0.0, 100, 'BEARISH', 'BULLISH', 'NEUTRAL', 'NO_TREND', 'STRONG', 'VERY_STRONG', 'WEAK']

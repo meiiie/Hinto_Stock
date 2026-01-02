@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\domain\entities\performance_metrics.py
+# hypothesis_version: 6.148.2
+
+[0.0, 99.99, 10000.0, 100, 10000, '+00:00', '-', 'LONG', 'PerformanceMetrics', 'SHORT', 'UNKNOWN', 'Z', 'average_loss', 'average_rr', 'average_win', 'avg_duration_minutes', 'avg_pnl', 'best_side', 'calmar_ratio', 'count', 'current_streak', 'exit_reason_stats', 'expectancy', 'inf', 'largest_loss', 'largest_win', 'long_trades', 'long_win_rate', 'losing_trades', 'max_consecutive_wins', 'max_drawdown', 'per_symbol', 'profit_factor', 'reason', 'recovery_factor', 'risk_metrics', 'sharpe_ratio', 'short_trades', 'short_win_rate', 'sortino_ratio', 'streak_stats', 'symbol', 'total_pnl', 'total_trades', 'win_rate', 'winning_trades']

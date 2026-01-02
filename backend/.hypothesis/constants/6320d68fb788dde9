@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\strategies\strategy_registry.py
+# hypothesis_version: 6.148.2
+
+[0.01, 0.015, 0.02, 0.025, 0.03, 0.04, 0.7, 0.75, 1.0, '15m', 'BNBUSDT', 'BTCUSDT', 'SOLUSDT', 'TAOUSDT', 'sfp_mean_reversion']

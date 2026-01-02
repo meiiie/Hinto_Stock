@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\application\signals\signal_generator.py
+# hypothesis_version: 6.148.2
+
+[0.0, 0.015, 0.2, 0.7, 0.98, 0.995, 0.999, 1.001, 1.005, 1.02, 1.05, 1.1, 100.0, 'NEUTRAL', 'atr', 'tp1', 'tp2', 'tp3']

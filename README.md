@@ -1,23 +1,27 @@
-# Hinto Trader Pro 📈
+# Hinto Trader Pro 📈 (Quant Lab Edition)
 
-**Professional Desktop Trading Application**
+**Professional Desktop Trading Application & Institutional Quant Lab**
 
-**Version:** 2.2 | **Status:** 🚀 Production Ready  
-**Strategy:** Trend Pullback (VWAP + Bollinger Bands + StochRSI)  
-**Market:** Multi-Token (BTC, ETH, SOL, BNB, TAO, FET, ONDO) × Multi-Timeframe (1m, 15m, 1h)
+**Version:** 3.1 | **Status:** 💎 SOTA Hardcore Verified  
+**Strategy:** Limit Sniper (Swing Point Liquidity Capture)  
+**Market:** Multi-Token Portfolio × Shark Tank Mode × Compounding Engine
 
 ---
 
-## ✨ Key Features (Dec 2025)
+## ✨ Key Features (Jan 2026)
 
-- **🎯 SOTA Multi-Token Trading** - 7 crypto tokens with Combined Streams (1 WebSocket = 21 streams)
-- **🚀 SOTA Multi-Timeframe Streaming** - Real-time updates every 250ms for 1m, 15m, 1h
-- **📦 Hybrid Data Layer** - SQLite persistence + Binance fallback (zero data loss on restart)
-- **🎨 Binance-Style UI** - Professional dark theme with token icons + TokenSelector
-- **📊 Advanced Charts** - TradingView Lightweight Charts with VWAP, BB, signals
-- **🗂️ Trade History Analytics** - Server-side filtering, Recharts visualizations, bulk CSV export
-- **⚡ State Machine** - BOOTSTRAP → SCANNING → IN_POSITION → COOLDOWN
-- **📱 Desktop App** - Tauri-powered native desktop application
+- **🧪 Quant Lab Dashboard** - Deep analytics with Equity Curves, Drawdown charts, and SOTA Design System.
+- **🦈 Shark Tank Mode** - Multi-symbol portfolio trading (Max 10) with intelligent signal selection.
+- ** nhân bản Lãi Kép (Compounding)** - Automatic position sizing based on real-time equity growth.
+- **📊 Institutional Backtest v3.1** - Now with **Liquidation Logic** and **Liquidity Caps ($50k)**.
+- **🛡️ Hardcore Risk Management** - Per-symbol Circuit Breakers + Portfolio Drawdown Protection.
+
+### 🏆 Hall of Fame Performance (Vốn $1,000)
+| Period | ROI | Result | Win Rate | Strategy Mode |
+|--------|-----|--------|----------|---------------|
+| **Tháng 10/2025** | **+2,800%** | **$29,626** | 37.2% | Shark Tank (No CB) |
+| **Tháng 11/2025** | **+813%** | **$9,136** | 31.7% | Shark Tank (No CB) |
+| **Tháng 12/2025** | **+181%** | **$2,812** | 35.0% | Hardcore Reality |
 
 ---
 
@@ -25,54 +29,38 @@
 
 | Document | Description |
 |----------|-------------|
-| [Project Architecture](documents/PROJECT_ARCHITECTURE.md) | System design and trading logic |
-| [Frontend Architecture](frontend/README.md) | React/TypeScript desktop UI |
-| [API Documentation](src/api/README.md) | FastAPI backend endpoints |
+| [GEMINI.md](GEMINI.md) | AI context file for development |
+| [Quant Lab Report](documents/luongngoai/notes/quant_lab_implementation_report_20260102.md) | Technical redesign details |
+| [Data Warehouse Plan](documents/luongngoai/notes/implementation_plan_data_warehouse.md) | Parquet caching strategy |
+| [Strategy Blueprint](documents/luongngoai/prompt/strategy_shark_tank_v3.md) | The "Money Printer" logic |
 
 ---
 
 ## ⚡ Quick Start
 
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- npm or pnpm
-
-### 1. Backend Setup
+### 1. Setup Environment
 ```bash
-# Create virtual environment
+# Create and activate venv
 python -m venv .venv
-.venv\Scripts\activate  # Windows
-source .venv/bin/activate  # Linux/Mac
+.\.venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Start backend
-python -m uvicorn src.api.main:app --reload
+# Install SOTA requirements
+pip install -r backend/requirements.txt
 ```
 
-### 2. Frontend Setup
+### 2. Run "Chiến Thần" Backtest (Recommended)
 ```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Development mode
-npm run dev
-
-# Production build
-npm run build
+cd backend
+python run_backtest.py --top 10 --days 30 --balance 1000 --leverage 10 --no-cb
 ```
 
-### 3. Run Tests
+### 3. Launch Quant Lab UI
 ```bash
-# Backend tests
-pytest tests/
+# Terminal 1: Backend API
+python run_real_backend.py
 
-# Architecture compliance
-pytest tests/architecture/ -v
+# Terminal 2: Frontend
+cd frontend && npm run dev
 ```
 
 ---
@@ -80,247 +68,46 @@ pytest tests/architecture/ -v
 ## 🏗️ Architecture
 
 ### Clean Architecture Layers
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    PRESENTATION LAYER                        │
-│  ┌─────────────────┐  ┌─────────────────┐                   │
-│  │   Frontend      │  │   Backend API   │                   │
-│  │   (React/TS)    │  │   (FastAPI)     │                   │
-│  │   + Tauri       │  │   + WebSocket   │                   │
-│  └────────┬────────┘  └────────┬────────┘                   │
-└───────────┼────────────────────┼────────────────────────────┘
-            │                    │
-            ▼                    ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    APPLICATION LAYER                         │
-│  ┌─────────────────┐  ┌─────────────────┐                   │
-│  │ SignalGenerator │  │ RealtimeService │                   │
-│  │ StateMachine    │  │ EventBus        │                   │
-│  └────────┬────────┘  └────────┬────────┘                   │
-└───────────┼────────────────────┼────────────────────────────┘
-            │                    │
-            ▼                    ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      DOMAIN LAYER                            │
-│  ┌─────────────────┐  ┌─────────────────┐                   │
-│  │    Entities     │  │   Interfaces    │                   │
-│  │ (Candle, Signal)│  │ (Repositories)  │                   │
-│  └─────────────────┘  └─────────────────┘                   │
-└─────────────────────────────────────────────────────────────┘
-            ▲                    ▲
-            │                    │
-┌───────────┴────────────────────┴────────────────────────────┐
-│                  INFRASTRUCTURE LAYER                        │
-│  ┌─────────────────┐  ┌─────────────────┐                   │
-│  │   Indicators    │  │   Persistence   │                   │
-│  │ (VWAP, BB, RSI) │  │   (SQLite)      │                   │
-│  └─────────────────┘  └─────────────────┘                   │
-│  ┌─────────────────┐  ┌─────────────────┐                   │
-│  │   WebSocket     │  │   REST Client   │                   │
-│  │ (Multi-Stream)  │  │   (Binance)     │                   │
-│  └─────────────────┘  └─────────────────┘                   │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### SOTA Multi-Token Architecture (Dec 2025)
-
-**Following Binance Official Best Practices:**
-
-| Feature | Implementation |
-|---------|---------------|
-| Combined Streams | 1 WebSocket for ALL symbols (7 × 3 = 21 streams) |
-| Max Streams | 1024 per connection (we use 21) |
-| Message Rate | < 5/second (compliant) |
-| Connection Lifetime | Auto-reconnect before 24h |
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                  SharedBinanceClient (Singleton)                 │
-│       wss://stream.binance.com/stream?streams=                  │
-│  btcusdt@kline_1m/ethusdt@kline_1m/solusdt@kline_1m/...        │
-│                     (1 WebSocket = 21 streams)                   │
-└─────────────────────────────────────────────────────────────────┘
-                               ↓ routes by symbol
-       ┌───────────────────────┼───────────────────────┐
-       ↓                       ↓                       ↓
-┌──────────────┐       ┌──────────────┐       ┌──────────────┐
-│ RealtimeService      │  RealtimeService     │  RealtimeService
-│   BTCUSDT    │       │    ETHUSDT   │       │    SOLUSDT   │
-└──────┬───────┘       └──────┬───────┘       └──────┬───────┘
-       ↓                       ↓                       ↓
-┌──────────────┐       ┌──────────────┐       ┌──────────────┐
-│ SignalGenerator      │  SignalGenerator     │  SignalGenerator
-└──────────────┘       └──────────────┘       └──────────────┘
-```
-
-**Supported Tokens (configurable via env):**
-- BTC, ETH, SOL, BNB, TAO, FET, ONDO (default 7)
-- Scalable to 100+ tokens (1024 stream limit)
-
-**Key Files:**
-- `SharedBinanceClient` - `src/infrastructure/websocket/shared_binance_client.py`
-- `MultiTokenConfig` - `src/config.py`
-- `TokenSelector` - `frontend/src/components/TokenSelector.tsx`
-
-### 📦 SOTA Hybrid Data Layer (Dec 2025)
-
-**Problem:** Data lost on backend restart, slow Binance API calls.
-
-**Solution:** Read-through cache pattern with 3 layers:
-
-```
-┌─────────────────────────────────────────┐
-│           REST API / Startup            │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│  L1: In-Memory (deques)                 │  ← Fastest, volatile
-├─────────────────────────────────────────┤
-│  L2: SQLite (80% threshold)             │  ← Fast, persistent
-├─────────────────────────────────────────┤
-│  L3: Binance REST API (fallback)        │  ← Slow, source of truth
-└─────────────────────────────────────────┘
-```
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| First startup | Binance only | Binance + save to SQLite |
-| Restart with data | Binance only | SQLite first (fast) |
-| Binance API down | No data | Use SQLite cache |
-
-### 🧠 SOTA Strategy Configuration (Dec 2025)
-
-**Problem:** Hardcoded strategy parameters caused near-zero signal generation.
-
-**Solution:** Centralized `StrategyConfig` dataclass with environment-based tuning:
-
-| Parameter | Before | After (SOTA) |
-|-----------|--------|--------------|
-| `strict_mode` | True (4/5) | **False** (3/5) |
-| `regime_filter` | Hard block | **Penalty mode** (-30%) |
-| `bb_threshold` | 1.5% | **2.5%** |
-| `vwap_threshold` | 1.0% | **2.0%** |
-| `stoch_oversold` | 20 | **30** |
-
-**Key Components:**
-- `StrategyConfig` - Centralized in `config.py`
-- `ConfluenceScorer` - Weighted signal scoring (60% threshold)
-- `RegimeDetector` - ADX-based with configurable threshold
-
-**Environment Variables:**
-```env
-STRATEGY_STRICT_MODE=false
-STRATEGY_REGIME_FILTER_MODE=penalty
-STRATEGY_BB_THRESHOLD_PCT=0.025
-```
+- **Presentation:** React 18 + Vite (Tailwind-free, THEME-based)
+- **Application:** FastAPI + Backtest Engine v3.1
+- **Infrastructure:** Parquet Data Warehouse (Pending) + Binance REST/WS
 
 ---
 
-## 🛠️ Project Structure
+## 📊 Trading Strategy: Limit Sniper v3.1
 
-```
-Hinto_Stock/
-├── src/
-│   ├── domain/             # Entities, Interfaces
-│   ├── application/        # Services, Signal Generation
-│   ├── infrastructure/     # Indicators, WebSocket, Persistence
-│   └── api/                # FastAPI Backend + EventBus
-├── frontend/
-│   ├── src/
-│   │   ├── components/     # React Components (CandleChart, TokenIcon)
-│   │   ├── hooks/          # useMarketData (WebSocket)
-│   │   └── styles/         # theme.ts, layout.css
-│   └── src-tauri/          # Tauri Desktop Config
-├── tests/
-│   ├── architecture/       # Clean Architecture tests
-│   └── unit/               # Unit tests
-├── scripts/                # Utility Scripts
-└── documents/              # Documentation
-```
+**Core Logic:**
+1. **Swing Analysis** - 20-period High/Low detection on **M15**.
+2. **Trend Filter** - EMA200 bias verification on **H4**.
+3. **Execution** - Limit orders placed at `Swing +/- 0.1%`.
+4. **Compounding** - Volume = `Balance * 10` (Targeting exponential growth).
+5. **Reality Cap** - Max $50,000 notional per order to ensure fillability.
 
 ---
 
-## 🎨 Frontend Features
+## 🎯 Roadmap 2026
 
-### Token Icons
-Uses `@web3icons/react` library for professional crypto icons:
-```tsx
-import { TokenIcon } from './components/TokenIcon';
-<TokenIcon symbol="BTC" size={24} />
-```
+### Phase 1: Quant Lab (COMPLETE ✅)
+- [x] Institutional Backtest Engine
+- [x] Hardcore Liquidation Logic
+- [x] Advanced Design System (THEME)
+- [x] Multi-Strategy Support
 
-### Real-Time Price Display
-- Header syncs with chart timeframe
-- Multi-timeframe WebSocket support
-- Tick-by-tick updates (250ms)
+### Phase 2: Data Warehouse (IN PROGRESS 🏗️)
+- [ ] Parquet Local Caching (Smart Sync)
+- [ ] 1-Year Backtest Capability
+- [ ] Historical Data Export
 
-### Theme System
-```typescript
-THEME.spacing.md  // 16px
-THEME.sizing.chart.minHeight  // 400px
-THEME.status.buy  // #0ECB81
-```
-
----
-
-### 🗂️ SOTA Trade History Analytics (Dec 2025)
-
-**Expert-level trading bot monitoring dashboard with institutional-grade features:**
-
-| Feature | Description |
-|---------|-------------|
-| **Server-Side Filtering** | Filter by Symbol, Side (LONG/SHORT), P&L (Profit/Loss) at SQL level |
-| **Bulk Export** | `/trades/export` endpoint downloads ALL matching trades as CSV |
-| **Exit Reason Analytics** | Win Rate, Avg P&L, Duration per exit type (TP, SL, Signal Reversal) |
-| **Risk Metrics** | Sharpe Ratio, Sortino Ratio, Calmar Ratio, Recovery Factor |
-| **Streak Tracking** | Current streak, Max consecutive wins/losses |
-| **Charts** | Recharts PieChart (Exit Distribution) + BarChart (P&L by Token) |
-
-**Tabbed Interface:**
-- **Tổng quan (Overview):** KPIs, Risk Metrics, Charts
-- **Theo Token (Per Token):** Symbol-level performance breakdown
-- **Lịch sử (History):** Paginated trade table with filters + Export
-
-**Key Endpoints:**
-```
-GET /trades/history?page=1&limit=20&symbol=BTCUSDT&side=LONG&pnl_filter=profit
-GET /trades/export?symbol=BTCUSDT&pnl_filter=profit  # All matching trades
-GET /trades/performance?days=365
-```
-
----
-
-## 📊 Trading Strategy
-
-### Trend Pullback Strategy (v2.1)
-1.  **Trend Detection:**
-    *   **Layer 1 (HTF):** 1H Trend Direction (EMA50) - *Global Filter*
-    *   **Layer 2 (Intraday):** Price vs VWAP - *Local Trend*
-2.  **Entry:**
-    *   **Setup:** Pullback to BB Lower/VWAP
-    *   **Trigger:** StochRSI Cross Up (< 30)
-    *   **Confluence:** Must align with 1H Trend (e.g., Buy only if 1H is Bullish)
-3.  **Exit:** StochRSI overbought (> 80) or TP/SL hit
-
-### Risk Management
-- Stop Loss: -1% from entry
-- Take Profit: Dynamic (1.5x-3x risk)
-- Position Size: Fixed or % of balance
-
----
-
-## 🎯 Goals
-
-Build a professional-grade, automated trading system with:
-- **Clean Architecture** for maintainability
-- **SOTA UI/UX** following Binance patterns
-- **Real-time data** via WebSocket streams
-- **Consistent profits** through statistical edge
+### Phase 3: Live Operations
+- [ ] Paper Trading Service
+- [ ] Binance API Execution Connector
+- [ ] Telegram Performance Alerts
 
 ---
 
 ## 📝 License
+MIT License - Developed by Hinto Engineering Team.
 
-MIT License - See LICENSE file for details.
+---
+
+*Last Updated: 2026-01-02 22:00 UTC*

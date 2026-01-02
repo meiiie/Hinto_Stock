@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\infrastructure\indicators\momentum_velocity_calculator.py
+# hypothesis_version: 6.148.2
+
+[0.0001, 0.5, 100]

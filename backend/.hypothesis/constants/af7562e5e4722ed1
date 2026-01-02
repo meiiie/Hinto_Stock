@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\infrastructure\websocket\binance_websocket_client.py
+# hypothesis_version: 6.148.2
+
+[1.0, 60.0, 1000, '/', '1m', '@kline_', 'E', 'btcusdt', 'connected', 'connecting', 'data', 'disconnected', 'error', 'interval', 'reconnecting', 'stream', 'symbol', 'unknown']

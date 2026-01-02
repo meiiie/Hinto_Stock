@@ -14,7 +14,8 @@ import { useWebSocket } from './hooks/useWebSocket';
 import CandleChart from './components/CandleChart';
 import Portfolio from './components/Portfolio';
 import TradeHistory from './components/TradeHistory';
-import PerformanceDashboard from './components/PerformanceDashboard';
+// PerformanceDashboard: now integrated into Quant Lab (Backtest page)
+// import PerformanceDashboard from './components/PerformanceDashboard';
 import Settings from './components/Settings';
 import StrategyMonitor from './components/StrategyMonitor';
 import SignalLogItem from './components/SignalLogItem';
@@ -45,7 +46,7 @@ interface SignalLog {
   trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
 }
 
-type Tab = 'chart' | 'portfolio' | 'history' | 'performance' | 'settings' | 'backtest';
+type Tab = 'chart' | 'portfolio' | 'history' | 'settings' | 'backtest';
 
 // Design tokens - using THEME for consistency (Phase C)
 const C = {
@@ -361,16 +362,15 @@ function App() {
       }
     };
     fetchStatus();
-    const interval = setInterval(fetchStatus, 15000);
+    const interval = setInterval(fetchStatus, 15000); // SOTA: Only poll on interval, not on every WebSocket update
     return () => clearInterval(interval);
   }, []);  // SOTA: Only poll on interval, not on every WebSocket update
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'chart', label: 'Chart' },
     { id: 'portfolio', label: 'Portfolio' },
-    { id: 'backtest', label: 'Backtest' },
+    { id: 'backtest', label: 'Quant Lab' },
     { id: 'history', label: 'History' },
-    { id: 'performance', label: 'Performance' },
     { id: 'settings', label: 'Settings' },
   ];
 
@@ -665,7 +665,6 @@ function App() {
               {activeTab === 'portfolio' && <Portfolio />}
               {activeTab === 'backtest' && <Backtest />}
               {activeTab === 'history' && <TradeHistory />}
-              {activeTab === 'performance' && <PerformanceDashboard />}
               {activeTab === 'settings' && <Settings />}
             </div>
           </div>

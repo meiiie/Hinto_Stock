@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\domain\interfaces\i_sfp_detector.py
+# hypothesis_version: 6.148.2
+
+['bearish', 'bullish', 'confidence', 'none', 'penetration_pct', 'rejection_strength', 'swing_price', 'type', 'volume_ratio']

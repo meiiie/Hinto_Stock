@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\domain\value_objects\signal_status.py
+# hypothesis_version: 6.148.2
+
+['cancelled', 'executed', 'expired', 'generated', 'pending', 'rejected']

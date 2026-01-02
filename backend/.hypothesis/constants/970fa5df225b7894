@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\application\services\confidence_calculator.py
+# hypothesis_version: 6.148.2
+
+[0.0, 0.3, 0.4, 0.5, 20.0, 50.0, 80.0, 100.0, 100, 'BUY', 'Excellent', 'Fair', 'Good', 'Invalid RSI value', 'Invalid direction', 'Poor', 'SELL', 'bearish', 'bullish', 'ema', 'error', 'neutral', 'neutral_bottom', 'neutral_top', 'overbought', 'oversold', 'rsi', 'volume']

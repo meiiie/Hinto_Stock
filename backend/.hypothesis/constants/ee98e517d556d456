@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\config.py
+# hypothesis_version: 6.148.2
+
+[0.01, 0.02, 0.025, 0.1, 0.25, 0.3, 0.7, 0.8, 1.0, 2.0, 4.0, 20.0, 30.0, 70.0, 300, ',', '.env', '1', 'BASE_URL', 'BINANCE_API_KEY', 'BINANCE_API_SECRET', 'BNBUSDT', 'BTCUSDT', 'DB_PATH', 'ETHUSDT', 'FETUSDT', 'ONDOUSDT', 'PAPER', 'REAL', 'SOLUSDT', 'STRATEGY_STRICT_MODE', 'SYMBOLS', 'TAOUSDT', 'TRADING_MODE', 'USDT', 'block', 'candle_confirmation', 'crypto_data.db', 'false', 'momentum_trigger', 'penalty', 'pullback_zone', 'trend_alignment', 'true', 'volume_confirmation', 'yes']

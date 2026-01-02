@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\domain\value_objects\regime_result.py
+# hypothesis_version: 6.148.2
+
+['_', 'confidence', 'features', 'is_ranging', 'is_trending', 'probabilities', 'ranging', 'regime', 'should_trade', 'trending_high_vol', 'trending_low_vol', '✅ TRADE', '❌ NO TRADE']

@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\application\analysis\ema_crossover.py
+# hypothesis_version: 6.148.2
+
+[0.0, 0.1, 0.2, 0.5, 50.0, 100.0, 100, 'bearish', 'bullish', 'neutral', 'none']

@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\infrastructure\indicators\volume_spike_detector.py
+# hypothesis_version: 6.148.2
+
+[0.0, 1.5, 2.0, 3.0, 10.0, 20.0, 30.0, 'extreme', 'moderate', 'none', 'strong']

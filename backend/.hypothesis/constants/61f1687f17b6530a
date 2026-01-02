@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\application\use_cases\calculate_indicators.py
+# hypothesis_version: 6.148.2
+
+['close', 'ema_7', 'high', 'low', 'open', 'open_time', 'rsi_6', 'volume', 'volume_ma_20']

@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\infrastructure\indicators\vwap_calculator.py
+# hypothesis_version: 6.148.2
+
+[0.0, 3.0, 100.0, 'close', 'cum_tpv', 'cum_volume', 'date', 'high', 'low', 'timestamp', 'tpv', 'typical_price', 'volume', 'vwap']

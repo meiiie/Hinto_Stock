@@ -1,0 +1,4 @@
+# file: E:\Sach\DuAn\Hinto_Stock\backend\src\application\services\paper_trading_service.py
+# hypothesis_version: 6.148.2
+
+[0.0, 0.015, 0.1, 0.8, 0.95, 1.2, 10.0, 100, 300, 600, 1000, 10000, '1', '1.5', '1m', '3', 'BTCUSDT', 'CANCELLED', 'CLOSED', 'LIQUIDATION', 'LONG', 'MANUAL_CLOSE', 'MERGED', 'NEW_SIGNAL_OVERRIDE', 'OPEN', 'PENDING', 'SHORT', 'SIGNAL_REVERSAL', 'STOP_LOSS', 'TAKE_PROFIT', 'TTL_EXPIRED', 'auto_execute', 'close_time', 'current_price', 'current_value', 'entry_price', 'exit_reason', 'false', 'id', 'leverage', 'limit', 'margin', 'max_positions', 'open_time', 'page', 'quantity', 'realized_pnl', 'risk_percent', 'roe_pct', 'rr_ratio', 'side', 'size_usd', 'status', 'stop_loss', 'symbol', 'take_profit', 'total', 'total_pages', 'tp1', 'trades', 'true', 'unrealized_pnl']
